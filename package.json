@@ -6,14 +6,18 @@
   "main": "electron/main.cjs",
   "author": "Tizah",
   "license": "MIT",
+
   "repository": {
     "type": "git",
     "url": "https://github.com/Tizahishere/UnionN0tDirect.git"
   },
+
   "bugs": {
     "url": "https://github.com/Tizahishere/UnionN0tDirect/issues"
   },
+
   "homepage": "https://github.com/Tizahishere/UnionN0tDirect#readme",
+
   "scripts": {
     "setup": "node node_modules/electron/install.js",
     "dev": "concurrently -k \"pnpm:dev:renderer\" \"pnpm:dev:electron\"",
@@ -25,13 +29,26 @@
     "pack": "pnpm -s build && electron-builder",
     "dist": "electron-builder"
   },
-  "dependencies": { ... },
-  "devDependencies": { ... },
+
+  "dependencies": {
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+
+  "devDependencies": {
+    "vite": "^6.4.1",
+    "typescript": "^5.9.2",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "pnpm": "^10.0.0"
+  },
+
   "build": {
     "icon": "assets/icon.ico",
     "appId": "xyz.unioncrax.notdirect",
     "productName": "Union Crax NotDirect",
     "npmRebuild": false,
+
     "publish": [
       {
         "provider": "github",
@@ -39,10 +56,12 @@
         "repo": "UnionN0tDirect"
       }
     ],
+
     "directories": {
       "output": "dist-packaged",
       "buildResources": "assets"
     },
+
     "files": [
       "assets/**/*",
       "electron/**/*",
@@ -50,30 +69,27 @@
       "renderer/dist/**/*",
       "package.json"
     ],
+
     "asarUnpack": [
       "node_modules/7zip-bin"
     ],
+
     "win": {
       "icon": "assets/icon.ico",
       "target": ["nsis", "portable", "zip"],
       "publisherName": "Tizah"
     },
+
     "nsis": {
       "oneClick": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Union Crax NotDirect"
     },
+
     "linux": {
       "target": ["AppImage"],
       "icon": "assets/icons"
-    }
-  },
-  "pnpm": {
-    "overrides": {
-      "react-server-dom-webpack": "19.2.3",
-      "react-server-dom-parcel": "19.2.3",
-      "react-server-dom-turbopack": "19.2.3"
     }
   }
 }
