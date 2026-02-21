@@ -1,68 +1,169 @@
-name: Build Electron App
+name:  Build & Release (Electron)
 
 on:
   push:
     tags:
       - 'v*'
-    branches:
-      - main
+  workflow_dispatch:
+
+env:
+  NODE_OPTIONS: --max_old_space_size=4096
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            platform: linux
-          - os: windows-latest
-            platform: win
-          - os: macos-latest
-            platform: mac
-            arch: x64
-          - os: macos-latest
-            platform: mac
-            arch: arm64
-    runs-on: ${{ matrix.os }}
-
+  build-linux:
+    name: Build Linux (AppImage)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v3
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: 'npm'
+          node-version: '20'
+
+      - name: Install pnpm (stable)
+        run: npm install -g pnpm
+
+      - name: Verify tools
+        run: |
+          node -v
+          npm -v
+          pnpm -v
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pnpm-store
+            ~/.cache/pnpm
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install system packages (Ubuntu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2
 
       - name: Install dependencies
-        run: npm install
+        run: pnpm install --frozen-lockfile --prefer-offline || pnpm install
 
-      - name: Create .env-cmdrc.json
+      - name: Build renderer (frontend)
+        run: pnpm -s build:renderer
+
+      - name: Build electron (backend)
+        run: pnpm -s build:electron
+
+      - name: Package Linux App (AppImage)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo '{
-            "production": {
-              "PUBLIC_URL": "./",
-              "REACT_APP_ANALYTICS_SCRIPT_ID": "${{ secrets.REACT_APP_ANALYTICS_SCRIPT_ID }}",
-              "API_ENDPOINT": "${{ secrets.API_ENDPOINT }}",
-              "GOOGLE_CLIENT_ID": "${{ secrets.GOOGLE_CLIENT_ID }}",
-              "GOOGLE_ELECTRON_CLIENT_ID": "${{ secrets.GOOGLE_ELECTRON_CLIENT_ID }}",
-              "GOOGLE_ELECTRON_CLIENT_SECRET": "${{ secrets.GOOGLE_ELECTRON_CLIENT_SECRET }}"
-            }
-          }' > .env-cmdrc.json
+          pnpm exec electron-builder --linux --x64 --publish=never
 
-      - name: Package Electron app
-        run: |
-          npm run build:electron-combine
-          npx electron-builder build --publish=never --${{ matrix.platform }} --${{ matrix.arch || 'x64' }}
+      - name: List dist-packaged (debug)
+        run: ls -la dist-packaged || true
 
-      - name: Upload dist artifacts
+      - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.os }}-${{ matrix.arch || 'x64' }}-artifacts
-          path: dist/
+          name: launcher-linux
+          path: dist-packaged/**
 
-      - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/')
+  build-windows:
+    name: Build Windows (NSIS/Portable)
+    runs-on: windows-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm (stable)
+        run: npm install -g pnpm
+
+      - name: Verify tools
+        run: |
+          node -v
+          npm -v
+          pnpm -v
+
+      - name: Cache pnpm store (Windows)
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:\Users\runneradmin\.pnpm-store
+            C:\Users\runneradmin\.cache\pnpm
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline || pnpm install
+        shell: bash
+
+      - name: Build renderer (frontend)
+        run: pnpm -s build:renderer
+        shell: bash
+
+      - name: Build electron (backend)
+        run: pnpm -s build:electron
+        shell: bash
+
+      - name: Package Windows App (NSIS / portable)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pnpm exec electron-builder --win --x64 --publish=never
+        shell: bash
+
+      - name: List dist-packaged (debug)
+        run: ls -la dist-packaged || true
+        shell: bash
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-windows
+          path: dist-packaged/**
+
+  release:
+    name: Create GitHub Release
+    needs: [build-linux, build-windows]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: launcher-linux
+          path: dist-packaged/linux || true
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: launcher-windows
+          path: dist-packaged/windows || true
+
+      - name: Show downloaded artifacts (debug)
+        run: ls -la dist-packaged || true
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/**
+          files: dist-packaged/**
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
