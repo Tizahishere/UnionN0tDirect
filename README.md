@@ -1,6 +1,7 @@
 # UnionCrax.NotDirect
 <img width="960" height="540" alt="main" src="https://github.com/user-attachments/assets/e6e7050a-3d7a-4f3c-9fb2-e466fd5f017b" />
-# If Buying Isn't Owning Pirating Isn't Stealing
+
+**If Buying Isn't Owning Pirating Isn't Stealing**
 
 A Fork of a cool electron app named Union Crax Direct or sum sh
 
