@@ -1,7 +1,9 @@
-name: Build and Release Launcher
+name: Build and Release
+
 
 on:
   push:
+    branches: [ main ]
     tags:
       - 'v*'
   workflow_dispatch:
@@ -9,84 +11,51 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
-
     permissions:
       contents: write
-
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - windows-latest
-          - ubuntu-latest
-
-    env:
-      ELECTRON_BUILDER_DISABLE_MAS: true
-      USE_HARD_LINKS: false
-      CSC_IDENTITY_AUTO_DISCOVERY: false
+        os: [windows-latest, ubuntu-latest]
 
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install pnpm (stable)
+      - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 8
-
-      - name: Ensure pnpm is available (debug)
-        run: |
-          pnpm -v
-          node -v
-          npm -v
-
-      - name: Enable Corepack (optional)
-        run: corepack enable
-
-      - name: Install system deps (ubuntu)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          # libfuse2 is commonly required for AppImage on newer ubuntu runners
-          sudo apt-get install -y libfuse2
+          version: 10
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install
 
-      - name: Build renderer (frontend)
-        run: pnpm -s build:renderer
-
-      - name: Build electron code (common)
-        run: pnpm -s build:electron
-
-      - name: Build Windows artifact
-        if: matrix.os == 'windows-latest'
+      - name: Build application
+        run: pnpm -s build && pnpm exec electron-builder --publish=never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          pnpm exec electron-builder --windows --x64 --publish=never
+          USE_HARD_LINKS: false
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      - name: Build Linux artifact
-        if: matrix.os == 'ubuntu-latest'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          pnpm exec electron-builder --linux --x64 --publish=never
-
-      - name: List dist-packaged (debug)
-        run: ls -la dist-packaged || true
-
-      - name: Upload build artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: launcher-${{ matrix.os }}
+          name: dist-${{ matrix.os }}
           path: |
-            dist-packaged/**
+            dist-packaged/*.exe
+            dist-packaged/*.zip
+            dist-packaged/*.AppImage
+            dist-packaged/*.tar.gz
 
   release:
     needs: build
@@ -94,18 +63,17 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist-packaged
 
-      - name: Create GitHub Release
+      - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          files: dist-packaged/**
           draft: false
           prerelease: false
-          files: dist-packaged/**
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
