@@ -32,29 +32,56 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '20'
 
-      - name: Install pnpm
-        run: npm install -g pnpm
+      - name: Install pnpm (stable)
+        uses: pnpm/action-setup@v4
+        with:
+          version: 8
 
-      - name: Enable Corepack
+      - name: Ensure pnpm is available (debug)
+        run: |
+          pnpm -v
+          node -v
+          npm -v
+
+      - name: Enable Corepack (optional)
         run: corepack enable
 
+      - name: Install system deps (ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          # libfuse2 is commonly required for AppImage on newer ubuntu runners
+          sudo apt-get install -y libfuse2
+
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
-      - name: Build renderer + electron
-        run: |
-          pnpm -s build:renderer
-          pnpm -s build:electron
+      - name: Build renderer (frontend)
+        run: pnpm -s build:renderer
 
-      - name: Build Electron Application
-        run: |
-          pnpm exec electron-builder --publish=never --${{ matrix.os == 'windows-latest' && 'win' || 'linux' }} --x64
+      - name: Build electron code (common)
+        run: pnpm -s build:electron
+
+      - name: Build Windows artifact
+        if: matrix.os == 'windows-latest'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pnpm exec electron-builder --windows --x64 --publish=never
 
-      - name: Upload artifacts
+      - name: Build Linux artifact
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pnpm exec electron-builder --linux --x64 --publish=never
+
+      - name: List dist-packaged (debug)
+        run: ls -la dist-packaged || true
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: launcher-${{ matrix.os }}
@@ -63,11 +90,8 @@ jobs:
 
   release:
     needs: build
-
     if: startsWith(github.ref, 'refs/tags/')
-
     runs-on: ubuntu-latest
-
     permissions:
       contents: write
 
@@ -77,11 +101,11 @@ jobs:
         with:
           path: dist-packaged
 
-      - name: Create Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: dist-packaged/**
           draft: false
           prerelease: false
+          files: dist-packaged/**
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
