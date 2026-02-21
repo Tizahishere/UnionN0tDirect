@@ -213,6 +213,7 @@ export function LauncherPage(): JSX.Element {
   /******************************
    * Spotlight auto-rotation    *
    *****************************/
+  // Ts still shows nsfw games after i tried to fix it still
   const featuredGamesForSpotlight = useMemo(() => {
     // choose top 8 as spotlight: prefer popular then newest
     const byPopularity = [...games].sort((a, b) => {
@@ -1097,3 +1098,6 @@ export function LauncherPage(): JSX.Element {
 }
 
 export default LauncherPage;
+
+// Congrats This is the end
+// i have gotten tortured enough
