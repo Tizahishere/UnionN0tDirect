@@ -1,16 +1,25 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react"
-import { useNavigate } from "react-router-dom"
-import { GameCard } from "@/components/GameCard"
-import { GameCardCompact } from "@/components/GameCardCompact"
-import { GameCardSkeleton } from "@/components/GameCardSkeleton"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import { SearchSuggestions } from "@/components/SearchSuggestions"
-import { ErrorMessage } from "@/components/ErrorMessage"
-import { RateLimitError } from "@/components/RateLimitError"
-import { AnimatedCounter } from "@/components/AnimatedCounter"
-import { OfflineBanner } from "@/components/OfflineBanner"
-import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel"
+// renderer/src/app/pages/LauncherPage.tsx
+import React, {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  startTransition,
+} from "react";
+import { useNavigate } from "react-router-dom";
+
+import { GameCard } from "@/components/GameCard";
+import { GameCardCompact } from "@/components/GameCardCompact";
+import { GameCardSkeleton } from "@/components/GameCardSkeleton";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorMessage } from "@/components/ErrorMessage";
+import { RateLimitError } from "@/components/RateLimitError";
+import { AnimatedCounter } from "@/components/AnimatedCounter";
+import { OfflineBanner } from "@/components/OfflineBanner";
+import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 import {
   Pagination,
   PaginationContent,
@@ -18,15 +27,53 @@ import {
   PaginationLink,
   PaginationNext,
   PaginationPrevious,
-} from "@/components/ui/pagination"
-import { apiUrl } from "@/lib/api"
-import { formatNumber, generateErrorCode, ErrorTypes } from "@/lib/utils"
-import { useOnlineStatus } from "@/hooks/use-online-status"
-import { Hammer, SlidersHorizontal, Wifi, EyeOff, ArrowRight, Server, Search } from "lucide-react"
+} from "@/components/ui/pagination";
 
-const extractDeveloper = (description: string): string => {
-  const developerMatch = description.match(/(?:by|from|developer|dev|studio)\s+([^.,\n]+)/i)
-  return developerMatch ? developerMatch[1].trim() : "Unknown"
+import { apiUrl } from "@/lib/api";
+import { formatNumber, generateErrorCode, ErrorTypes } from "@/lib/utils";
+import { useOnlineStatus } from "@/hooks/use-online-status";
+
+import {
+  Hammer,
+  Search,
+  Sun,
+  Moon,
+  Heart,
+  ChevronUp,
+  Grid,
+  List,
+  Star,
+  Download,
+  Clock,
+} from "lucide-react";
+
+/* -------------------------------------------------------------------------- */
+/* ------------------------------ Helpers & Types ---------------------------- */
+/* -------------------------------------------------------------------------- */
+
+interface Game {
+  appid: string;
+  name: string;
+  description: string;
+  genres: string[];
+  image: string;
+  release_date: string;
+  size: string;
+  source: string;
+  version?: string;
+  update_time?: string;
+  searchText?: string;
+  developer?: string;
+  hasCoOp?: boolean;
+}
+
+class GamesFetchError extends Error {
+  status?: number;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = "GamesFetchError";
+    this.status = status;
+  }
 }
 
 const normalizeSearchText = (text: string): string =>
@@ -36,919 +83,1017 @@ const normalizeSearchText = (text: string): string =>
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^\w\s]/g, " ")
     .replace(/\s+/g, " ")
-    .trim()
+    .trim();
 
-const shuffleGames = <T,>(items: T[]) => {
-  const result = [...items]
-  for (let i = result.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1))
-      ;[result[i], result[j]] = [result[j], result[i]]
-  }
-  return result
+function useDebounced<T>(value: T, delay = 260) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
 }
 
-interface Game {
-  appid: string
-  name: string
-  description: string
-  genres: string[]
-  image: string
-  release_date: string
-  size: string
-  source: string
-  version?: string
-  update_time?: string
-  searchText?: string
-  developer?: string
-  hasCoOp?: boolean
-}
+/* -------------------------------------------------------------------------- */
+/* ------------------------------ Component --------------------------------- */
+/* -------------------------------------------------------------------------- */
 
-export function LauncherPage() {
-  const navigate = useNavigate()
-  const isOnline = useOnlineStatus()
+export function LauncherPage(): JSX.Element {
+  const navigate = useNavigate();
+  const isOnline = useOnlineStatus();
 
-  class GamesFetchError extends Error {
-    status?: number
-    constructor(message: string, status?: number) {
-      super(message)
-      this.name = "GamesFetchError"
-      this.status = status
+  // core state
+  const [games, setGames] = useState<Game[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchInput, setSearchInput] = useState("");
+  const debouncedSearch = useDebounced(searchInput, 260);
+  const [refreshing, setRefreshing] = useState(false);
+  const [gameStats, setGameStats] = useState<Record<string, { downloads: number; views: number }>>({});
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [gamesError, setGamesError] = useState<{ type: string; message: string; code: string } | null>(null);
+  const [hasLoadedGames, setHasLoadedGames] = useState(false);
+  const [emptyStateReady, setEmptyStateReady] = useState(false);
+
+  // pagination / hybrid mode
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
+  const [useHybridLoadMore, setUseHybridLoadMore] = useState(true); // hybrid pagination + load more
+
+  // derived & auxiliary
+  const [recentlyInstalledGames, setRecentlyInstalledGames] = useState<Game[]>([]);
+  const [shortcutLabel, setShortcutLabel] = useState("Ctrl+K");
+  const [statsCacheTime, setStatsCacheTime] = useState<number>(0);
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    try {
+      return (localStorage.getItem("uc_theme") as "dark" | "light") || "dark";
+    } catch {
+      return "dark";
     }
-  }
+  });
+  const [viewMode, setViewMode] = useState<"grid" | "compact">(() => {
+    try {
+      return (localStorage.getItem("uc_view_mode") as "grid" | "compact") || "grid";
+    } catch {
+      return "grid";
+    }
+  });
+
+  // new features: favorites, recently viewed, modal / spotlight
+  const [favorites, setFavorites] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("uc_favorites") || "[]");
+    } catch {
+      return [];
+    }
+  });
+  const [recentlyViewed, setRecentlyViewed] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("uc_recently_viewed") || "[]");
+    } catch {
+      return [];
+    }
+  });
+
+  // modal & spotlight
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalGame, setModalGame] = useState<Game | null>(null);
+  const [spotlightIndex, setSpotlightIndex] = useState(0);
+  const spotlightTimerRef = useRef<number | null>(null);
+
+  // scroll-to-top
+  const [showBackToTop, setShowBackToTop] = useState(false);
+
+  // active load id for concurrency safety (copied from original)
+  const activeLoadIdRef = useRef(0);
+
+  /******************************
+   * Small effects & persisted *
+   *****************************/
+  useEffect(() => {
+    // platform shortcut label
+    if (typeof navigator !== "undefined") {
+      const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+      setShortcutLabel(isMac ? "Cmd+K" : "Ctrl+K");
+    }
+  }, []);
+
+  useEffect(() => {
+    // apply theme
+    try {
+      document.documentElement.classList.toggle("dark", theme === "dark");
+      localStorage.setItem("uc_theme", theme);
+    } catch {}
+  }, [theme]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("uc_view_mode", viewMode);
+    } catch {}
+  }, [viewMode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("uc_favorites", JSON.stringify(favorites));
+    } catch {}
+  }, [favorites]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("uc_recently_viewed", JSON.stringify(recentlyViewed));
+    } catch {}
+  }, [recentlyViewed]);
+
+  useEffect(() => {
+    // scroll event for back-to-top
+    const onScroll = () => setShowBackToTop(window.scrollY > 600);
+    window.addEventListener("scroll", onScroll);
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  /******************************
+   * Spotlight auto-rotation    *
+   *****************************/
+  const featuredGamesForSpotlight = useMemo(() => {
+    // choose top 8 as spotlight: prefer popular then newest
+    const byPopularity = [...games].sort((a, b) => {
+      const aStats = gameStats[a.appid] || { downloads: 0, views: 0 };
+      const bStats = gameStats[b.appid] || { downloads: 0, views: 0 };
+      return bStats.downloads - aStats.downloads;
+    });
+    return byPopularity.slice(0, 8);
+  }, [games, gameStats]);
+
+  useEffect(() => {
+    if (spotlightTimerRef.current) {
+      window.clearInterval(spotlightTimerRef.current);
+      spotlightTimerRef.current = null;
+    }
+    if (featuredGamesForSpotlight.length > 1) {
+      spotlightTimerRef.current = window.setInterval(() => {
+        setSpotlightIndex((s) => (s + 1) % featuredGamesForSpotlight.length);
+      }, 7000);
+    }
+    return () => {
+      if (spotlightTimerRef.current) window.clearInterval(spotlightTimerRef.current);
+      spotlightTimerRef.current = null;
+    };
+  }, [featuredGamesForSpotlight.length]);
+
+  /******************************
+   * Fetch game stats & games   *
+   *****************************/
+  const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
   const isTransientGamesFetchError = (error: unknown): boolean => {
-    // TypeError is the common fetch() exception for network errors.
-    if (error instanceof TypeError) return true
-    const status = error instanceof GamesFetchError ? error.status : undefined
-    // Treat common upstream/startup statuses as transient (DB warming up, gateway unavailable, etc.).
-    return status === 429 || status === 500 || status === 502 || status === 503 || status === 504
-  }
+    if (error instanceof TypeError) return true;
+    const status = error instanceof GamesFetchError ? error.status : undefined;
+    return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+  };
 
-  const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
+  const fetchGameStats = useCallback(
+    async (forceRefresh = false) => {
+      try {
+        if (!forceRefresh && Object.keys(gameStats).length > 0) {
+          const now = Date.now();
+          const recentCache = now - statsCacheTime < 30000;
+          if (recentCache) return;
+        }
 
-  const [games, setGames] = useState<Game[]>([])
-  const [loading, setLoading] = useState(true)
-  const [searchInput, setSearchInput] = useState("")
-  const [refreshing, setRefreshing] = useState(false)
-  const [gameStats, setGameStats] = useState<Record<string, { downloads: number; views: number }>>({})
-  const [refreshKey, setRefreshKey] = useState(0)
-  const [gamesError, setGamesError] = useState<{ type: string; message: string; code: string } | null>(null)
-  const [hasLoadedGames, setHasLoadedGames] = useState(false)
-  const [emptyStateReady, setEmptyStateReady] = useState(false)
-  const [currentPage, setCurrentPage] = useState(1)
-  const [recentlyInstalledGames, setRecentlyInstalledGames] = useState<Game[]>([])
-  const [shortcutLabel, setShortcutLabel] = useState("Ctrl+K")
-  const itemsPerPage = 20
-  const [statsCacheTime, setStatsCacheTime] = useState<number>(0)
+        const response = await fetch(apiUrl("/api/downloads/all"));
 
-  const activeLoadIdRef = useRef(0)
+        if (response.status === 429) {
+          setGamesError({
+            type: "rate-limit",
+            message: "Please wait.",
+            code: generateErrorCode(ErrorTypes.DOWNLOADS_FETCH, "launcher-stats"),
+          });
+          return;
+        }
 
-  useEffect(() => {
-    if (typeof navigator === "undefined") return
-    const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform)
-    setShortcutLabel(isMac ? "Cmd+K" : "Ctrl+K")
-  }, [])
+        if (!response.ok) {
+          throw new Error(`Stats API route failed: ${response.status}`);
+        }
 
-  useEffect(() => {
-    loadGames()
-  }, [])
+        const data = await response.json();
+        if (data && typeof data === "object") {
+          startTransition(() => {
+            setGameStats(data);
+            setStatsCacheTime(Date.now());
+          });
+        }
+      } catch (error) {
+        console.error("[UC] Error fetching game stats:", error);
+      }
+    },
+    [gameStats, statsCacheTime]
+  );
 
-  useEffect(() => {
-    if (loading) {
-      setEmptyStateReady(false)
-      return
-    }
-    const timer = window.setTimeout(() => {
-      setEmptyStateReady(true)
-    }, 400)
-    return () => window.clearTimeout(timer)
-  }, [loading])
-
-  // Auto-retry when coming back online
-  useEffect(() => {
-    if (isOnline && games.length === 0 && !loading) {
-      setGamesError(null)
-      setLoading(true)
-      loadGames(true)
-    }
-  }, [isOnline])
-
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    const handleHomeNav = () => {
-      document.getElementById("featured")?.scrollIntoView({ behavior: "smooth" })
-    }
-    const handleHomeHero = () => {
-      document.getElementById("hero")?.scrollIntoView({ behavior: "smooth" })
+  const fetchGames = useCallback(async (): Promise<Game[]> => {
+    // Check offline before attempting fetch
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      return [];
     }
 
-    window.addEventListener("uc_home_nav", handleHomeNav)
-    window.addEventListener("uc_home_hero", handleHomeHero)
-    return () => {
-      window.removeEventListener("uc_home_nav", handleHomeNav)
-      window.removeEventListener("uc_home_hero", handleHomeHero)
-    }
-  }, [])
+    const response = await fetch(apiUrl("/api/games"));
 
+    if (!response.ok) {
+      throw new GamesFetchError(`API route failed: ${response.status}`, response.status);
+    }
+
+    const data = await response.json();
+    return data.map((game: any) => ({
+      ...game,
+      searchText: normalizeSearchText(`${game.name} ${game.description} ${game.genres?.join(" ") || ""}`),
+      developer: game.developer && game.developer !== "Unknown" ? game.developer : (() => {
+        const match = (game.description || "").match(/(?:by|from|developer|dev|studio)\s+([^.,\n]+)/i);
+        return match ? match[1].trim() : "Unknown";
+      })(),
+    }));
+  }, []);
+
+  const loadGames = useCallback(
+    async (forceRefresh = false) => {
+      const loadId = ++activeLoadIdRef.current;
+      const isInitialLoad = !hasLoadedGames && games.length === 0;
+      const maxAttempts = isInitialLoad ? 12 : 2;
+
+      let refreshStart: number | null = null;
+      if (isInitialLoad) setLoading(true);
+      if (forceRefresh) {
+        setRefreshing(true);
+        refreshStart = Date.now();
+      }
+      setGamesError(null);
+
+      for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+        try {
+          const gamesData = await fetchGames();
+          if (loadId !== activeLoadIdRef.current) return;
+
+          startTransition(() => {
+            setGames(gamesData);
+            setHasLoadedGames(true);
+          });
+
+          if (gamesData.length > 0) {
+            await fetchGameStats(forceRefresh);
+          }
+
+          setLoading(false);
+          if (refreshStart !== null) {
+            const elapsed = Date.now() - refreshStart;
+            const minDuration = 500; // ms
+            if (elapsed < minDuration) {
+              setTimeout(() => setRefreshing(false), minDuration - elapsed);
+            } else {
+              setRefreshing(false);
+            }
+          } else {
+            setRefreshing(false);
+          }
+          return;
+        } catch (error) {
+          if (loadId !== activeLoadIdRef.current) return;
+
+          // If we went offline mid-load, stop retrying and let the offline UI handle it.
+          if (typeof navigator !== "undefined" && !navigator.onLine) {
+            setLoading(false);
+            setRefreshing(false);
+            return;
+          }
+
+          const transient = isOnline && isTransientGamesFetchError(error);
+          const hasMoreAttempts = attempt < maxAttempts;
+
+          if (transient && hasMoreAttempts) {
+            const delayMs = Math.min(8000, 500 * Math.pow(2, attempt));
+            await sleep(delayMs);
+            continue;
+          }
+
+          console.error("Error loading games:", error);
+
+          if (error instanceof GamesFetchError && error.status === 429) {
+            setGamesError({
+              type: "rate-limit",
+              message: "Sum shit just happened  (Error 429).",
+              code: generateErrorCode(ErrorTypes.GAME_FETCH, "launcher"),
+            });
+          } else {
+            setGamesError({
+              type: "games",
+              message:
+                error instanceof GamesFetchError && error.status
+                  ? `Unable to load games (Status: ${error.status}). Please try again or contact support if the issue persists.`
+                  : "Unable to load games. Please try again or contact support if the issue persists.",
+              code: generateErrorCode(ErrorTypes.GAME_FETCH, "launcher"),
+            });
+          }
+          setLoading(false);
+          setRefreshing(false);
+          return;
+        }
+      }
+    },
+    [fetchGames, fetchGameStats, games.length, hasLoadedGames, isOnline]
+  );
+
+  // initial load
   useEffect(() => {
-    let ignore = false
+    void loadGames();
+  }, [loadGames]);
+
+  /******************************
+   * Recently installed lookup  *
+   *****************************/
+  useEffect(() => {
+    let ignore = false;
     const loadInstalled = async () => {
-      const installedMap = new Map<string, Game>()
+      const installedMap = new Map<string, Game>();
       try {
         if (typeof window !== "undefined") {
           const installedList =
-            ((await window.ucDownloads?.listInstalledGlobal?.()) as any[]) ||
-            ((await window.ucDownloads?.listInstalled?.()) as any[]) ||
-            []
+            ((await (window as any).ucDownloads?.listInstalledGlobal?.()) as any[]) ||
+            ((await (window as any).ucDownloads?.listInstalled?.()) as any[]) ||
+            [];
 
           for (const entry of installedList) {
-            const meta = (entry && (entry.metadata || entry.game)) || entry
+            const meta = (entry && (entry.metadata || entry.game)) || entry;
             if (meta && meta.appid) {
-              // Use remote image only; localImage is a file path that can't be used in web context
               installedMap.set(meta.appid, {
                 ...meta,
                 name: meta.name || meta.appid,
                 image: meta.image || "/banner.png",
                 genres: Array.isArray(meta.genres) ? meta.genres : [],
-              })
+              });
             }
           }
         }
-      } catch {
-        // ignore installed lookup failures
-      }
+      } catch {}
+      const installedGames = Array.from(installedMap.values());
+      installedGames.sort((a: any, b: any) => (b.addedAt || 0) - (a.addedAt || 0));
+      if (!ignore) setRecentlyInstalledGames(installedGames.slice(0, 10));
+    };
 
-      const installedGames = Array.from(installedMap.values())
-      // prefer most recently added if available
-      installedGames.sort((a: any, b: any) => (b.addedAt || 0) - (a.addedAt || 0))
-      const resolved = installedGames.slice(0, 10)
-
-      if (!ignore) {
-        setRecentlyInstalledGames(resolved)
-      }
-    }
-
-    void loadInstalled()
-
+    void loadInstalled();
     return () => {
-      ignore = true
-    }
-  }, [refreshKey])
+      ignore = true;
+    };
+  }, [refreshKey]);
+
+  /******************************
+   * Search suggestions + filter *
+   *****************************/
+  const [searchSuggestions, setSearchSuggestions] = useState<{ appid: string; name: string }[]>([]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return
-    const handleFocus = () => setRefreshKey((prev) => prev + 1)
-    const handleGameInstalled = () => setRefreshKey((prev) => prev + 1)
-    window.addEventListener("focus", handleFocus)
-    window.addEventListener("uc_game_installed", handleGameInstalled)
-    return () => {
-      window.removeEventListener("focus", handleFocus)
-      window.removeEventListener("uc_game_installed", handleGameInstalled)
+    if (!debouncedSearch || debouncedSearch.trim().length === 0) {
+      setSearchSuggestions([]);
+      return;
     }
-  }, [])
+    const q = normalizeSearchText(debouncedSearch);
+    const matches = games.filter((g) => g.searchText?.includes(q)).slice(0, 8).map((g) => ({ appid: g.appid, name: g.name }));
+    setSearchSuggestions(matches);
+  }, [debouncedSearch, games]);
 
-  const fetchGameStats = async (forceRefresh = false) => {
+  /******************************
+   * Derived lists: new/popular  *
+   *****************************/
+  const newReleases = useMemo(() => games.slice(0, 8), [games]);
+
+  const popularReleases = useMemo(() => {
+    if (Object.keys(gameStats).length === 0) return [];
+    const getDaysDiff = (dateStr?: string) => {
+      if (!dateStr) return 999;
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return 999;
+      const now = new Date();
+      const diffTime = Math.abs(now.getTime() - date.getTime());
+      return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    };
+    const isRecent = (dateStr?: string, days = 30) => getDaysDiff(dateStr) <= days;
+    const calculateScore = (game: Game) => {
+      const stats = gameStats[game.appid] || { downloads: 0, views: 0 };
+      let score = stats.downloads * 2 + stats.views * 0.5;
+      if (isRecent(game.release_date, 30)) score += 500;
+      if (isRecent(game.update_time, 14)) score += 300;
+      return score;
+    };
+    const candidates = games.filter((g) => !(Array.isArray(g.genres) && g.genres.some((genre) => genre?.toLowerCase() === "nsfw")));
+    const sorted = [...candidates].sort((a, b) => calculateScore(b) - calculateScore(a));
+    return sorted.slice(0, 8);
+  }, [games, gameStats]);
+
+  const popularAppIds = useMemo(() => new Set(popularReleases.map((g) => g.appid)), [popularReleases]);
+
+  /******************************
+   * Pagination / Hybrid load    *
+   *****************************/
+  const featuredForDisplay = useMemo(() => {
+    if (games.length === 0) return [];
+    return refreshKey > 0 ? [...games].sort(() => Math.random() - 0.5) : games;
+  }, [games, refreshKey]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [featuredForDisplay]);
+
+  const paginatedFeaturedGames = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return featuredForDisplay.slice(startIndex, endIndex);
+  }, [featuredForDisplay, currentPage, itemsPerPage]);
+
+  const totalPages = Math.max(1, Math.ceil(featuredForDisplay.length / itemsPerPage));
+  const startItem = (currentPage - 1) * itemsPerPage + 1;
+  const endItem = Math.min(currentPage * itemsPerPage, featuredForDisplay.length);
+
+  /******************************
+   * Stats aggregator            *
+   *****************************/
+  const stats = useMemo(() => {
+    const totalSizeGB = games.reduce((acc, game) => {
+      const sizeMatch = (game.size || "").match(/(\d+(?:\.\d+)?)\s*(GB|MB)/i);
+      if (sizeMatch) {
+        const size = Number.parseFloat(sizeMatch[1]);
+        const unit = sizeMatch[2].toUpperCase();
+        if (!isNaN(size) && size > 0) {
+          return acc + (unit === "GB" ? size : size / 1024);
+        }
+      }
+      return acc;
+    }, 0);
+    const totalSizeTB = totalSizeGB > 0 ? Math.round((totalSizeGB / 1024) * 10) / 10 : 0;
+    const totalDownloads = Object.values(gameStats).reduce((acc, stat) => acc + (stat.downloads || 0), 0);
+    return {
+      totalGames: games.length,
+      totalSizeGB: Math.round(totalSizeGB * 10) / 10,
+      totalSizeTB,
+      totalDownloads,
+    };
+  }, [games, gameStats]);
+
+  /******************************
+   * Favorites & RecentlyViewed  *
+   *****************************/
+  const toggleFavorite = useCallback((appid: string) => {
+    setFavorites((prev) => {
+      const next = prev.includes(appid) ? prev.filter((p) => p !== appid) : [appid, ...prev];
+      return next;
+    });
+  }, []);
+
+  const addRecentlyViewed = useCallback((appid: string) => {
+    setRecentlyViewed((prev) => {
+      const next = [appid, ...prev.filter((p) => p !== appid)].slice(0, 12);
+      return next;
+    });
+  }, []);
+
+  /******************************
+   * Modal and open actions     *
+   *****************************/
+  const openGameModal = useCallback((game: Game) => {
+    setModalGame(game);
+    setModalOpen(true);
+    addRecentlyViewed(game.appid);
+    // optional: set discord rpc via ipc if your preload exposes it
     try {
-      if (!forceRefresh && Object.keys(gameStats).length > 0) {
-        const now = Date.now()
-        const recentCache = now - statsCacheTime < 30000
-        if (recentCache) return
+      if ((window as any).ipcRenderer?.invoke) {
+        (window as any).ipcRenderer.invoke("set-discord-activity", {
+          details: `Browsing ${game.name}`,
+          state: "Union Crax NotDirect",
+          largeImageKey: "logo",
+          startTimestamp: Date.now(),
+        });
       }
+    } catch {}
+  }, [addRecentlyViewed]);
 
-      const response = await fetch(apiUrl("/api/downloads/all"))
+  const goToGame = useCallback((appid: string) => {
+    addRecentlyViewed(appid);
+    navigate(`/game/${encodeURIComponent(appid)}`);
+  }, [navigate, addRecentlyViewed]);
 
-      if (response.status === 429) {
-        setGamesError({
-          type: "rate-limit",
-          message: "Ye be firin' the cannons too fast, matey! Give the crew a moment to reload before ye try again.",
-          code: generateErrorCode(ErrorTypes.DOWNLOADS_FETCH, "launcher-stats"),
-        })
-        return
+  const copyGameLink = async (appid: string) => {
+    const url = `${window.location.origin}/game/${encodeURIComponent(appid)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {}
+  };
+
+  /******************************
+   * UI Handlers                *
+   *****************************/
+  const handleSearchSubmit = useCallback(
+    (e: FormEvent) => {
+      e.preventDefault();
+      if (searchInput.trim()) navigate(`/search?q=${encodeURIComponent(searchInput.trim())}`);
+    },
+    [searchInput, navigate]
+  );
+
+  const handleRefresh = useCallback(() => {
+    setRefreshKey((p) => p + 1);
+    void loadGames(true);
+  }, [loadGames]);
+
+  /******************************
+   * Keyboard shortcut to focus *
+   *****************************/
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (mod && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        const el = document.querySelector<HTMLInputElement>("#uc-search-input");
+        el?.focus();
+      } else if (e.key === "/") {
+        const el = document.querySelector<HTMLInputElement>("#uc-search-input");
+        if (document.activeElement !== el) {
+          e.preventDefault();
+          el?.focus();
+        }
+      } else if (e.key === "Escape") {
+        setModalOpen(false);
       }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, []);
 
-      if (!response.ok) {
-        throw new Error(`Stats API route failed: ${response.status}`)
-      }
+  /******************************
+   * Render helpers             *
+   *****************************/
+  const isGamePopular = (appid: string) => popularAppIds.has(appid);
 
-      const data = await response.json()
-      if (data && typeof data === "object") {
-        startTransition(() => {
-          setGameStats(data)
-          setStatsCacheTime(Date.now())
-        })
-      }
-    } catch (error) {
-      console.error("[UC] Error fetching game stats:", error)
-    }
-  }
-
-  const fetchGames = async (): Promise<Game[]> => {
-    // Check offline before attempting fetch
-    if (typeof navigator !== "undefined" && !navigator.onLine) {
-      // Don't set an error — we'll show the offline banner instead
-      return []
-    }
-
-    const response = await fetch(apiUrl("/api/games"))
-
-    if (!response.ok) {
-      throw new GamesFetchError(`API route failed: ${response.status}`, response.status)
-    }
-
-    const data = await response.json()
-    return data.map((game: any) => ({
-      ...game,
-      searchText: normalizeSearchText(`${game.name} ${game.description} ${game.genres?.join(" ") || ""}`),
-      developer: game.developer && game.developer !== "Unknown" ? game.developer : extractDeveloper(game.description),
-    }))
-  }
-
-  const loadGames = async (forceRefresh = false) => {
-    const loadId = ++activeLoadIdRef.current
-    const isInitialLoad = !hasLoadedGames && games.length === 0
-    const maxAttempts = isInitialLoad ? 12 : 2
-
-    // While the DB/API is warming up, keep the skeleton visible rather than flashing empty/error states.
-    let refreshStart: number | null = null
-    if (isInitialLoad) setLoading(true)
-    if (forceRefresh) {
-      setRefreshing(true)
-      refreshStart = Date.now()
-    }
-    setGamesError(null)
-
-    for (let attempt = 0; attempt <= maxAttempts; attempt++) {
-      try {
-        const gamesData = await fetchGames()
-        if (loadId !== activeLoadIdRef.current) return
-
-        startTransition(() => {
-          setGames(gamesData)
-          setHasLoadedGames(true)
-        })
-
-        if (gamesData.length > 0) {
-          fetchGameStats(forceRefresh)
-        }
-
-        setLoading(false)
-        if (refreshStart !== null) {
-          const elapsed = Date.now() - refreshStart
-          const minDuration = 500 // ms
-          if (elapsed < minDuration) {
-            setTimeout(() => setRefreshing(false), minDuration - elapsed)
-          } else {
-            setRefreshing(false)
-          }
-        } else {
-          setRefreshing(false)
-        }
-        return
-      } catch (error) {
-        if (loadId !== activeLoadIdRef.current) return
-
-        // If we went offline mid-load, stop retrying and let the offline UI handle it.
-        if (typeof navigator !== "undefined" && !navigator.onLine) {
-          setLoading(false)
-          setRefreshing(false)
-          return
-        }
-
-        const transient = isOnline && isTransientGamesFetchError(error)
-        const hasMoreAttempts = attempt < maxAttempts
-
-        if (transient && hasMoreAttempts) {
-          const delayMs = Math.min(8000, 500 * Math.pow(2, attempt))
-          await sleep(delayMs)
-          continue
-        }
-
-        console.error("Error loading games:", error)
-
-        if (error instanceof GamesFetchError && error.status === 429) {
-          setGamesError({
-            type: "rate-limit",
-            message: "Ye be firin' the cannons too fast, matey! Give the crew a moment to reload before ye try again.",
-            code: generateErrorCode(ErrorTypes.GAME_FETCH, "launcher"),
-          })
-        } else {
-          setGamesError({
-            type: "games",
-            message:
-              error instanceof GamesFetchError && error.status
-                ? `Unable to load games (Status: ${error.status}). Please try again or contact support if the issue persists.`
-                : "Unable to load games. Please try again or contact support if the issue persists.",
-            code: generateErrorCode(ErrorTypes.GAME_FETCH, "launcher"),
-          })
-        }
-        setLoading(false)
-        setRefreshing(false)
-        return
-      }
-    }
-  }
-
+  /******************************
+   * Main render                *
+   *****************************/
+  // Rate limit special render
   if (gamesError?.type === "rate-limit" && isOnline && !loading) {
     return (
       <RateLimitError
         message={gamesError.message}
         errorCode={gamesError.code}
         retry={() => {
-          setGamesError(null)
-          setLoading(true)
-          loadGames(true)
+          setGamesError(null);
+          setLoading(true);
+          void loadGames(true);
         }}
       />
-    )
+    );
   }
 
-  const newReleases = useMemo(() => {
-    return games.slice(0, 8)
-  }, [games])
-
-  const popularReleases = useMemo(() => {
-    if (Object.keys(gameStats).length === 0) return []
-
-    const getDaysDiff = (dateStr?: string) => {
-      if (!dateStr) return 999
-      const date = new Date(dateStr)
-      if (isNaN(date.getTime())) return 999
-      const now = new Date()
-      const diffTime = Math.abs(now.getTime() - date.getTime())
-      return Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-    }
-
-    const isRecent = (dateStr?: string, days = 30) => getDaysDiff(dateStr) <= days
-
-    const calculateScore = (game: Game) => {
-      const stats = gameStats[game.appid] || { downloads: 0, views: 0 }
-      let score = (stats.downloads * 2) + (stats.views * 0.5)
-
-      if (isRecent(game.release_date, 30)) {
-        score += 500
-      }
-
-      if (isRecent(game.update_time, 14)) {
-        score += 300
-      }
-
-      return score
-    }
-
-    const candidates = games.filter((game) => {
-       const isNSFW = Array.isArray(game.genres) && game.genres.some((genre) => genre?.toLowerCase() === "nsfw")
-       return !isNSFW
-    })
-
-    const sorted = [...candidates].sort((a, b) => calculateScore(b) - calculateScore(a))
-
-    return sorted.slice(0, 8)
-  }, [games, gameStats])
-
-  const popularAppIds = useMemo(() => new Set(popularReleases.map((game) => game.appid)), [popularReleases])
-
-  const featuredGames = useMemo(() => {
-    if (games.length === 0) return []
-    return refreshKey > 0 ? shuffleGames(games) : games
-  }, [games, refreshKey])
-
-  useEffect(() => {
-    setCurrentPage(1)
-  }, [featuredGames])
-
-  const paginatedFeaturedGames = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage
-    const endIndex = startIndex + itemsPerPage
-    return featuredGames.slice(startIndex, endIndex)
-  }, [featuredGames, currentPage, itemsPerPage])
-
-  const totalPages = Math.ceil(featuredGames.length / itemsPerPage)
-  const startItem = (currentPage - 1) * itemsPerPage + 1
-  const endItem = Math.min(currentPage * itemsPerPage, featuredGames.length)
-
-  const stats = useMemo(() => {
-    const totalSizeGB = games.reduce((acc, game) => {
-      const sizeMatch = (game.size || "").match(/(\d+(?:\.\d+)?)\s*(GB|MB)/i)
-      if (sizeMatch) {
-        const size = Number.parseFloat(sizeMatch[1])
-        const unit = sizeMatch[2].toUpperCase()
-        if (!isNaN(size) && size > 0) {
-          return acc + (unit === "GB" ? size : size / 1024)
-        }
-      }
-      return acc
-    }, 0)
-
-    const totalSizeTB = totalSizeGB > 0 ? Math.round((totalSizeGB / 1024) * 10) / 10 : 0
-    const totalDownloads = Object.values(gameStats).reduce((acc, stat) => acc + (stat.downloads || 0), 0)
-
-    return {
-      totalGames: games.length,
-      totalSizeGB: Math.round(totalSizeGB * 10) / 10,
-      totalSizeTB: totalSizeTB,
-      totalDownloads: totalDownloads,
-    }
-  }, [games, gameStats])
-
-  const displayTotalSizeTB = (stats as any).totalSizeTB ?? 0
-  const displayTotalSizeGB = (stats as any).totalSizeGB ?? Math.round(displayTotalSizeTB * 1024 * 10) / 10
-
-  const handleSearchSubmit = useCallback(
-    (e: FormEvent) => {
-      e.preventDefault()
-      if (searchInput.trim()) {
-        navigate(`/search?q=${encodeURIComponent(searchInput.trim())}`)
-      }
-    },
-    [searchInput, navigate]
-  )
-
-  const handleSearchChange = useCallback((value: string) => {
-    setSearchInput(value)
-  }, [])
-
   return (
-    <div className="min-h-screen bg-background">
-      <section id="hero" className="relative py-20 sm:py-24 md:py-32 px-4 text-center">
-        <div className="container mx-auto max-w-5xl">
-          <div className="flex justify-center mb-8">
-            <div className="p-4 sm:p-6 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/30 shadow-lg shadow-primary/10">
-              <Hammer className="h-12 w-12 sm:h-16 sm:w-16 text-primary" />
+    <div className="min-h-screen bg-background text-foreground">
+      {/* HERO / HEADER */}
+      <section id="hero" className="relative py-6 sm:py-8 px-4 border-b border-border/40 bg-card/10 sticky top-0 z-30">
+        <div className="container mx-auto max-w-7xl flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="p-2 rounded-lg bg-gradient-to-br from-primary to-purple-500 text-white shadow">
+              <Hammer className="h-7 w-7" />
+            </div>
+            <div>
+              <h1 className="text-xl sm:text-2xl font-black">Union Crax NotDirect</h1>
+              <p className="text-xs text-muted-foreground">A Fork Made By Underscore111_</p>
             </div>
           </div>
-          <h1 className="text-4xl sm:text-5xl md:text-7xl font-black mb-6 sm:mb-8 text-foreground font-montserrat text-balance leading-tight">
-            Free Games for{" "}
-            <span className="bg-gradient-to-r from-primary via-purple-400 to-primary bg-clip-text text-transparent">
-              Everyone
-            </span>
-          </h1>
-          <p className="text-base sm:text-xl md:text-2xl text-muted-foreground mb-8 sm:mb-12 max-w-3xl mx-auto leading-relaxed text-pretty">
-            Join UnionCrax and fulfill all your gaming needs. No matter who you are, where you're from, or how much
-            money you make - we make games accessible to everyone.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button
-              size="lg"
-              className="font-semibold text-base sm:text-lg px-6 sm:px-8 py-5 sm:py-6 rounded-xl bg-primary hover:bg-primary/90 shadow-lg shadow-primary/25"
-              onClick={() => document.getElementById("featured")?.scrollIntoView({ behavior: "smooth" })}
+
+          <div className="flex-1 max-w-3xl">
+            <form onSubmit={handleSearchSubmit} className="relative">
+              <input
+                id="uc-search-input"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder={`Search games (${shortcutLabel})`}
+                className="w-full rounded-full border border-input px-4 py-2 pr-28 bg-card/40 placeholder:text-muted-foreground"
+              />
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                <Button size="sm" variant="outline" onClick={() => { setSearchInput(""); document.getElementById("uc-search-input")?.focus(); }}>
+                  Clear
+                </Button>
+                <Button size="sm" onClick={() => void handleSearchSubmit(new Event("submit") as any)}>
+                  Search
+                </Button>
+              </div>
+
+              {searchSuggestions.length > 0 && searchInput.trim() && (
+                <div className="absolute left-0 right-0 mt-2 bg-card border rounded-md overflow-auto max-h-52 z-40">
+                  {searchSuggestions.map((s) => (
+                    <button
+                      key={s.appid}
+                      onClick={() => navigate(`/game/${s.appid}`)}
+                      className="w-full text-left px-3 py-2 hover:bg-muted/20"
+                    >
+                      {s.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </form>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              aria-label="Toggle theme"
+              onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+              className="p-2 rounded border hover:bg-muted/10"
             >
-              Browse Games
-            </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              className="font-semibold text-base sm:text-lg px-6 sm:px-8 py-5 sm:py-6 rounded-xl border-2 bg-transparent"
-              onClick={() => window.open("https://union-crax.xyz/discord", "_blank", "noreferrer")}
+              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </button>
+
+            <button
+              aria-label="Toggle view"
+              onClick={() => setViewMode((v) => (v === "grid" ? "compact" : "grid"))}
+              className="p-2 rounded border hover:bg-muted/10"
             >
-              Join Discord
-            </Button>
+              {viewMode === "grid" ? <Grid className="h-4 w-4" /> : <List className="h-4 w-4" />}
+            </button>
           </div>
         </div>
       </section>
 
-      {/* Announcement Banner */}
-      <section className="py-8 px-4 border-y border-border/50">
-        <div className="container mx-auto max-w-4xl text-center">
-          <div className="inline-flex items-center gap-3 px-6 py-3 rounded-full bg-gradient-to-r from-orange-400/15 via-orange-300/15 to-orange-200/15 border border-orange-200/30 shadow-sm">
-            <Hammer className="h-5 w-5 text-orange-500" />
-            <span className="text-base font-semibold text-foreground/90">
-              UnionCrax.Direct is currently in beta —{" "}
-              <a
-                href="https://github.com/Union-Crax/UnionCrax.Direct/issues"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-bold text-orange-500 underline underline-offset-4 decoration-orange-300/30 hover:decoration-orange-500/60"
-              >
-                Report issues on GitHub
-              </a>
-              .
-            </span>
-          </div>
-        </div>
-      </section>
-
-      {/* Stats Section */}
-      <section className="py-12 sm:py-16 md:py-20 px-4">
-        <div className="container mx-auto max-w-6xl">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="group p-5 sm:p-8 rounded-2xl bg-gradient-to-br from-card to-card/50 border border-border/50 hover:border-primary/30 transition-all space-y-3">
-              <div className="text-3xl sm:text-4xl md:text-5xl font-black bg-gradient-to-br from-primary to-purple-400 bg-clip-text text-transparent font-montserrat">
-                {displayTotalSizeGB >= 1024 ? (
-                  <AnimatedCounter value={displayTotalSizeTB} suffix="TB" />
-                ) : displayTotalSizeGB && displayTotalSizeGB > 0 ? (
-                  <AnimatedCounter value={displayTotalSizeGB} suffix="GB" />
-                ) : (
-                  "?"
-                )}
-              </div>
-              <div className="text-foreground/90 font-semibold">Total Storage*</div>
-              <div className="text-xs text-muted-foreground leading-relaxed">
-                * Actual bandwidth used is around{" "}
-                {(() => {
-                  const bandwidthGB = displayTotalSizeGB * 3
-                  const bandwidthTB = Math.round((bandwidthGB / 1024) * 10) / 10
-                  return bandwidthGB >= 1024
-                    ? `${bandwidthTB}TB`
-                    : `${Math.round(bandwidthGB * 10) / 10}GB`
-                })()} as we upload to multiple hosts
-              </div>
-            </div>
-
-            <div className="group p-5 sm:p-8 rounded-2xl bg-gradient-to-br from-card to-card/50 border border-border/50 hover:border-primary/30 transition-all space-y-3">
-              <div className="text-3xl sm:text-4xl md:text-5xl font-black bg-gradient-to-br from-primary to-purple-400 bg-clip-text text-transparent font-montserrat">
-                {stats.totalGames === 0 ? "?" : <AnimatedCounter value={stats.totalGames} format={formatNumber} />}
-              </div>
-              <div className="text-foreground/90 font-semibold">Games Available*</div>
-              <div className="text-xs text-muted-foreground">
-                * Restored {stats.totalGames === 0 ? "0" : stats.totalGames} of 1228 games after the attack
-              </div>
-            </div>
-
-            <div className="group p-5 sm:p-8 rounded-2xl bg-gradient-to-br from-card to-card/50 border border-border/50 hover:border-primary/30 transition-all space-y-3">
-              <div className="text-3xl sm:text-4xl md:text-5xl font-black bg-gradient-to-br from-primary to-purple-400 bg-clip-text text-transparent font-montserrat">
-                {stats.totalDownloads === 0 ? (
-                  "?"
-                ) : (
-                  <AnimatedCounter value={stats.totalDownloads} format={formatNumber} />
-                )}
-              </div>
-              <div className="text-foreground/90 font-semibold">Total Downloads</div>
-            </div>
-
-            <div className="group p-5 sm:p-8 rounded-2xl bg-gradient-to-br from-card to-card/50 border border-border/50 hover:border-primary/30 transition-all space-y-3">
-              <div className="text-3xl sm:text-4xl md:text-5xl font-black bg-gradient-to-br from-primary to-purple-400 bg-clip-text text-transparent font-montserrat">
-                {stats.totalGames === 0 ? "0%" : <AnimatedCounter value={100} suffix="%" />}
-              </div>
-              <div className="text-foreground/90 font-semibold">Free Forever</div>
-            </div>
-          </div>
-          <div className="text-center mt-8">
-            <p className="text-sm text-muted-foreground italic">We prefer dangerous freedom over peaceful slavery</p>
-          </div>
-        </div>
-      </section>
-
-      {/* Search Bar (clickable - opens global search popup) */}
-      <div id="home-search" className="py-8 px-4 border-y border-border/50 bg-card/30">
-        <div className="container mx-auto max-w-3xl">
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => typeof window !== "undefined" && window.dispatchEvent(new Event("uc_open_search_popup"))}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault()
-                window.dispatchEvent(new Event("uc_open_search_popup"))
-              }
-            }}
-            className="w-full px-4 py-3 text-base rounded-xl border-2 cursor-pointer text-muted-foreground flex items-center gap-3 transition-colors hover:border-primary/50 border-input"
-          >
-            <Search className="h-5 w-5 flex-shrink-0" aria-hidden />
-            <span>Click to search ({shortcutLabel})</span>
-          </div>
-        </div>
-      </div>
-
-      {recentlyInstalledGames.length > 0 && (
-        <section className="py-12 sm:py-16 md:py-20 px-4">
-          <div className="container mx-auto max-w-7xl">
-            <div className="mb-10">
-              <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-foreground font-montserrat mb-3">
-                Recently Installed
-              </h2>
-              <p className="text-base sm:text-lg text-muted-foreground">
-                Games you installed on this device
-              </p>
-            </div>
-
-            <Carousel
-              opts={{
-                align: "start",
-                loop: false,
-                skipSnaps: false,
-                dragFree: true,
-              }}
-              className="w-full"
-            >
-              <CarouselContent className="-ml-2 md:-ml-4">
-                {recentlyInstalledGames.map((game) => (
-                  <CarouselItem
-                    key={game.appid}
-                    className="pl-2 md:pl-4 basis-1/2 sm:basis-1/3 md:basis-1/4 lg:basis-1/5"
-                  >
-                    <GameCardCompact
-                      game={{
-                        appid: game.appid,
-                        name: game.name,
-                        image: game.image,
-                        genres: game.genres,
-                      }}
+      {/* Announcement / Spotlight */}
+      <section className="py-8 px-4">
+        <div className="container mx-auto max-w-7xl">
+          <div className="rounded-2xl overflow-hidden border border-border/30 bg-gradient-to-br from-card to-card/60 p-4">
+            {/* Spotlight area: show the featuredGamesForSpotlight[spotlightIndex] */}
+            {featuredGamesForSpotlight.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+                <div className="md:col-span-2">
+                  <div className="relative rounded-lg overflow-hidden h-56 md:h-72">
+                    <img
+                      src={featuredGamesForSpotlight[spotlightIndex].image || "/banner.png"}
+                      alt={featuredGamesForSpotlight[spotlightIndex].name}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
                     />
-                  </CarouselItem>
-                ))}
-                <CarouselItem className="pl-2 md:pl-4 basis-1/2 sm:basis-1/3 md:basis-1/4 lg:basis-1/5">
-                  <button
-                    type="button"
-                    onClick={() => navigate("/library")}
-                    className="group block h-full w-full text-left"
-                    aria-label="Open your installed library"
-                  >
-                    <div className="h-full rounded-2xl border border-dashed border-border/60 bg-card/60 p-4 flex flex-col items-center justify-center text-center transition hover:border-primary/50">
-                      <div className="text-sm font-semibold text-foreground">Manage installs</div>
-                      <div className="text-xs text-muted-foreground mt-1">Open your library</div>
-                      <div className="mt-3 text-xs text-primary group-hover:underline">/library</div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent flex items-end p-6">
+                      <div>
+                        <h2 className="text-2xl font-black text-white">{featuredGamesForSpotlight[spotlightIndex].name}</h2>
+                        <p className="text-sm text-white/90 mt-1 line-clamp-2">{featuredGamesForSpotlight[spotlightIndex].description}</p>
+                        <div className="mt-3 flex gap-2">
+                          <Button onClick={() => openGameModal(featuredGamesForSpotlight[spotlightIndex])}>Open</Button>
+                          <Button variant="outline" onClick={() => window.open(featuredGamesForSpotlight[spotlightIndex].source || "#", "_blank")}>Source</Button>
+                        </div>
+                      </div>
                     </div>
-                  </button>
-                </CarouselItem>
-              </CarouselContent>
-              <CarouselPrevious />
-              <CarouselNext />
-            </Carousel>
-          </div>
-        </section>
-      )}
+                  </div>
+                </div>
 
+                {/* Right: small stats / actions */}
+                <div className="md:col-span-1 space-y-3">
+                  <div className="p-4 rounded-lg bg-card border border-border/20">
+                    <div className="text-xs text-muted-foreground">Total Storage*</div>
+                    <div className="text-lg font-bold">
+                      {stats.totalSizeGB >= 1024 ? <AnimatedCounter value={stats.totalSizeTB} suffix="TB" /> : stats.totalSizeGB && stats.totalSizeGB > 0 ? <AnimatedCounter value={stats.totalSizeGB} suffix="GB" /> : "?"}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-2">* Estimation across hosts</div>
+                  </div>
+
+                  <div className="p-4 rounded-lg bg-card border border-border/20">
+                    <div className="text-xs text-muted-foreground">Games</div>
+                    <div className="text-lg font-bold">{stats.totalGames === 0 ? "?" : <AnimatedCounter value={stats.totalGames} format={formatNumber} />}</div>
+                    <div className="text-xs text-muted-foreground mt-2">Downloads: {stats.totalDownloads === 0 ? "?" : formatNumber(stats.totalDownloads)}</div>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-card/50 border border-border/20">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-semibold">Favorites</div>
+                      <button onClick={() => setFavorites([])} className="text-xs text-muted-foreground">Clear</button>
+                    </div>
+
+                    <div className="mt-2 flex gap-2 overflow-x-auto py-2">
+                      {favorites.length === 0 ? (
+                        <div className="text-xs text-muted-foreground">No favorites yet</div>
+                      ) : (
+                        favorites.map((appid) => {
+                          const g = games.find((gg) => gg.appid === appid);
+                          if (!g) return null;
+                          return (
+                            <button key={appid} onClick={() => openGameModal(g)} className="flex-shrink-0">
+                              <img src={g.image} alt={g.name} className="h-16 w-28 object-cover rounded-md" loading="lazy" />
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground">No spotlight games available</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Controls / Filters */}
+      <section className="py-6 px-4 border-y border-border/40">
+        <div className="container mx-auto max-w-7xl flex flex-col lg:flex-row gap-4 items-start">
+          <div className="flex-1">
+            <div className="flex gap-3 items-center mb-3">
+              <div className="relative w-full md:w-2/3">
+                <input
+                  id="uc-search-input-2"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  placeholder={`Search games (${shortcutLabel})`}
+                  className="w-full px-4 py-3 rounded-xl border bg-card/20"
+                />
+                {searchSuggestions.length > 0 && searchInput.trim() && (
+                  <div className="absolute left-0 right-0 mt-2 bg-card border rounded-md z-40 max-h-52 overflow-auto">
+                    {searchSuggestions.map((s) => (
+                      <button key={s.appid} onClick={() => navigate(`/game/${s.appid}`)} className="w-full text-left px-3 py-2 hover:bg-muted/10">
+                        {s.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <Button size="sm" variant="outline" onClick={() => { setSearchInput(""); document.getElementById("uc-search-input-2")?.focus(); }}>
+                Clear
+              </Button>
+
+              <Button size="sm" onClick={() => { setRefreshKey((p) => p + 1); void loadGames(true); }} disabled={refreshing}>
+                {refreshing ? "Refreshing..." : "Refresh"}
+              </Button>
+            </div>
+
+            <div className="flex items-center gap-3 flex-wrap text-sm">
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">View:</span>
+                <button onClick={() => setViewMode("grid")} className={`px-3 py-1 rounded ${viewMode === "grid" ? "bg-primary text-white" : "bg-card/20"}`}>Grid</button>
+                <button onClick={() => setViewMode("compact")} className={`px-3 py-1 rounded ${viewMode === "compact" ? "bg-primary text-white" : "bg-card/20"}`}>Compact</button>
+              </div>
+
+              <div className="ml-auto flex items-center gap-2">
+                <label className="text-sm text-muted-foreground mr-2">Items per page</label>
+                <select value={itemsPerPage} onChange={(e) => { const v = Number(e.target.value); setItemsPerPage(v); setCurrentPage(1); }} className="px-3 py-1 rounded border bg-card/20">
+                  <option value={12}>12</option>
+                  <option value={20}>20</option>
+                  <option value={40}>40</option>
+                </select>
+                <label className="ml-3 text-sm">
+                  <input type="checkbox" checked={useHybridLoadMore} onChange={(e) => setUseHybridLoadMore(e.target.checked)} /> Use hybrid (pages + load more)
+                </label>
+              </div>
+            </div>
+          </div>
+
+          {/* sidebar: recently installed & recent viewed */}
+          <aside className="w-full lg:w-72 space-y-3">
+            {recentlyInstalledGames.length > 0 && (
+              <div className="rounded-2xl p-3 bg-card border border-border/20">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold">Recently Installed</h4>
+                  <button onClick={() => setRecentlyInstalledGames([])} className="text-xs text-muted-foreground">Clear</button>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  {recentlyInstalledGames.map((g) => (
+                    <button key={g.appid} onClick={() => openGameModal(g)} className="text-left">
+                      <img src={g.image} className="h-16 w-full object-cover rounded" alt={g.name} />
+                      <div className="text-xs mt-1">{g.name}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="rounded-2xl p-3 bg-card border border-border/20">
+              <div className="flex items-center justify-between">
+                <h4 className="font-semibold">Recently Viewed</h4>
+                <button onClick={() => setRecentlyViewed([])} className="text-xs text-muted-foreground">Clear</button>
+              </div>
+
+              <div className="mt-3 space-y-2">
+                {recentlyViewed.length === 0 ? <div className="text-xs text-muted-foreground">Open games to populate this list</div> : recentlyViewed.map((appid) => {
+                  const g = games.find((x) => x.appid === appid);
+                  if (!g) return null;
+                  return (
+                    <div key={appid} className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <img src={g.image} alt={g.name} className="h-10 w-16 object-cover rounded" />
+                        <div>
+                          <div className="text-sm">{g.name}</div>
+                          <div className="text-xs text-muted-foreground">{g.developer || g.genres?.[0]}</div>
+                        </div>
+                      </div>
+                      <div>
+                        <button onClick={() => goToGame(appid)} className="text-xs">Open</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      {/* Latest / Popular sections */}
+      <main className="py-8 px-4">
+        <div className="container mx-auto max-w-7xl">
+          {/* Latest */}
+          <section className="mb-10">
+            <div className="mb-6 flex items-center justify-between">
+              <div>
+                <h2 className="text-3xl font-black">Latest Games</h2>
+                <p className="text-sm text-muted-foreground">Recently added games</p>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                {Array.from({ length: 4 }).map((_, i) => <GameCardSkeleton key={i} />)}
+              </div>
+            ) : (
+              <Carousel opts={{ align: "start", loop: false, dragFree: true }} className="w-full">
+                <CarouselContent className="-ml-2 md:-ml-4">
+                  {newReleases.map((g) => (
+                    <CarouselItem key={g.appid} className="pl-2 md:pl-4 basis-full sm:basis-1/2 md:basis-1/3 lg:basis-1/3 xl:basis-1/4">
+                      <div onClick={() => openGameModal(g)} role="button" tabIndex={0}>
+                        <GameCard game={g} stats={gameStats[g.appid]} />
+                      </div>
+                    </CarouselItem>
+                  ))}
+                </CarouselContent>
+                <CarouselPrevious />
+                <CarouselNext />
+              </Carousel>
+            )}
+          </section>
+
+          {/* Popular */}
+          <section className="mb-10">
+            <div className="mb-6 flex items-center justify-between">
+              <div>
+                <h2 className="text-3xl font-black">Most Popular</h2>
+                <p className="text-sm text-muted-foreground">Top trending downloads</p>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                {Array.from({ length: 4 }).map((_, i) => <GameCardSkeleton key={i} />)}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                {popularReleases.map((g) => (
+                  <div key={g.appid} onClick={() => openGameModal(g)}><GameCard game={g} stats={gameStats[g.appid]} isPopular /></div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* All / Grid (Hybrid pagination + Load more) */}
+          <section id="featured" className="py-6">
+            <div className="mb-6 flex items-center justify-between">
+              <div>
+                <h2 className="text-3xl font-black">All Games</h2>
+                <p className="text-sm text-muted-foreground">Showing {startItem}-{endItem} of {featuredForDisplay.length}</p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <Button variant="outline" size="sm" onClick={() => { setRefreshKey((p) => p + 1); void loadGames(true); }}>
+                  {refreshing ? "Refreshing..." : "Refresh"}
+                </Button>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                {Array.from({ length: itemsPerPage }).map((_, i) => <GameCardSkeleton key={i} />)}
+              </div>
+            ) : (
+              <>
+                <div className={`grid ${viewMode === "grid" ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" : "grid-cols-1 sm:grid-cols-2 md:grid-cols-3"} gap-6`}>
+                  {paginatedFeaturedGames.map((g) => {
+                    const isFav = favorites.includes(g.appid);
+                    const isPop = isGamePopular(g.appid);
+                    return (
+                      <div key={g.appid} className="relative group">
+                        <div onClick={() => openGameModal(g)} role="button" tabIndex={0}>
+                          {viewMode === "compact" ? <GameCardCompact game={{ appid: g.appid, name: g.name, image: g.image, genres: g.genres }} /> : <GameCard game={g} stats={gameStats[g.appid]} isPopular={isPop} />}
+                        </div>
+
+                        <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition flex gap-2">
+                          <button aria-label={isFav ? "Remove favorite" : "Add favorite"} onClick={(e) => { e.stopPropagation(); toggleFavorite(g.appid); }} className="p-2 rounded-full bg-card/80 border">
+                            <Heart className={`h-4 w-4 ${isFav ? "text-red-400" : "text-muted-foreground"}`} />
+                          </button>
+                          <button aria-label="Open" onClick={(e) => { e.stopPropagation(); goToGame(g.appid); }} className="p-2 rounded-full bg-card/80 border">
+                            <ChevronUp className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Pagination + Load more (hybrid if enabled) */}
+                <div className="mt-8 flex items-center justify-center gap-4">
+                  <Pagination>
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious onClick={() => setCurrentPage(Math.max(1, currentPage - 1))} className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"} />
+                      </PaginationItem>
+
+                      {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                        let pageNumber: number;
+                        if (totalPages <= 5) pageNumber = i + 1;
+                        else if (currentPage <= 3) pageNumber = i + 1;
+                        else if (currentPage >= totalPages - 2) pageNumber = totalPages - 4 + i;
+                        else pageNumber = currentPage - 2 + i;
+                        return (
+                          <PaginationItem key={pageNumber}>
+                            <PaginationLink onClick={() => setCurrentPage(pageNumber)} isActive={currentPage === pageNumber} className="cursor-pointer">
+                              {pageNumber}
+                            </PaginationLink>
+                          </PaginationItem>
+                        );
+                      })}
+
+                      <PaginationItem>
+                        <PaginationNext onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))} className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"} />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+                </div>
+
+                {useHybridLoadMore && currentPage < totalPages && (
+                  <div className="mt-6 text-center">
+                    <Button onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}>Load more</Button>
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+        </div>
+      </main>
+
+      {/* Offline / Errors */}
       {!isOnline && games.length === 0 && !loading && (
-        <OfflineBanner
-          onRetry={() => {
-            setGamesError(null)
-            setLoading(true)
-            loadGames(true)
-          }}
-        />
-      )}
-
-      {!isOnline && games.length > 0 && (
-        <section className="py-4 px-4">
-          <div className="container mx-auto max-w-4xl">
-            <OfflineBanner
-              variant="compact"
-              onRetry={() => {
-                setGamesError(null)
-                setLoading(true)
-                loadGames(true)
-              }}
-            />
-          </div>
-        </section>
+        <OfflineBanner onRetry={() => { setGamesError(null); setLoading(true); void loadGames(true); }} />
       )}
 
       {gamesError && isOnline && !loading && (
         <section className="py-6 px-4">
           <div className="container mx-auto max-w-4xl">
-            <div className="mb-6">
-              <ErrorMessage
-                title="Games Loading Issue"
-                message={gamesError.message}
-                errorCode={gamesError.code}
-                retry={() => {
-                  setGamesError(null)
-                  setLoading(true)
-                  loadGames(true)
-                }}
-              />
-            </div>
+            <ErrorMessage title="Games Loading Issue" message={gamesError.message} errorCode={gamesError.code} retry={() => { setGamesError(null); setLoading(true); void loadGames(true); }} />
           </div>
         </section>
       )}
 
-      {(loading || newReleases.length > 0) && (
-        <section className="py-12 sm:py-16 md:py-20 px-4 overflow-visible">
-          <div className="container mx-auto max-w-7xl">
-            {loading ? (
-              <>
-                <div className="mb-10">
-                  <Skeleton className="h-10 w-48 mb-3 bg-muted/40" />
-                  <Skeleton className="h-5 w-80 bg-muted/30" />
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {Array.from({ length: 4 }).map((_, index) => (
-                    <GameCardSkeleton key={`skeleton-latest-${index}`} />
-                  ))}
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="mb-10">
-                  <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-foreground font-montserrat mb-3">Latest Games</h2>
-                  <p className="text-base sm:text-lg text-muted-foreground">Recently added games to our collection</p>
-                </div>
-                <Carousel
-                  opts={{
-                    align: "start",
-                    loop: false,
-                    skipSnaps: false,
-                    dragFree: true,
-                  }}
-                  className="w-full"
-                >
-                  <CarouselContent className="-ml-2 md:-ml-4">
-                    {newReleases.map((game) => (
-                      <CarouselItem
-                        key={game.appid}
-                        className="pl-2 md:pl-4 basis-full sm:basis-1/2 md:basis-1/3 lg:basis-1/3 xl:basis-1/4"
-                      >
-                        <GameCard game={game} stats={gameStats[game.appid]} />
-                      </CarouselItem>
-                    ))}
-                  </CarouselContent>
-                  <CarouselPrevious />
-                  <CarouselNext />
-                </Carousel>
-              </>
-            )}
-          </div>
-        </section>
+      {/* Back to top */}
+      {showBackToTop && (
+        <button onClick={() => document.getElementById("hero")?.scrollIntoView({ behavior: "smooth" })} className="fixed bottom-6 right-6 z-50 p-3 rounded-full bg-primary text-white shadow-lg hover:scale-105 transition" aria-label="Back to top">
+          <ChevronUp className="h-5 w-5" />
+        </button>
       )}
 
-      {(loading || popularReleases.length > 0) && (
-        <section className="relative py-16 sm:py-20 md:py-24 px-4 overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-b from-primary/10 via-background/50 to-background pointer-events-none -z-10" />
-          <div className="container relative z-10 mx-auto max-w-7xl">
-            {loading ? (
-              <div className="mb-12">
-                <Skeleton className="h-12 w-64 mb-4 bg-muted/20" />
-                <Skeleton className="h-6 w-96 bg-muted/10" />
+      {/* Modal */}
+      {modalOpen && modalGame && (
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setModalOpen(false)} />
+          <div className="relative z-10 max-w-4xl w-full bg-card rounded-2xl p-6 border border-border/20 shadow-2xl">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <h3 className="text-xl font-bold">{modalGame.name}</h3>
+              <button aria-label="Close" onClick={() => setModalOpen(false)} className="p-2 rounded-full border">✕</button>
+            </div>
+
+            <div className="grid md:grid-cols-3 gap-4">
+              <div className="md:col-span-1">
+                <img src={modalGame.image} alt={modalGame.name} className="w-full rounded-md object-cover" loading="lazy" />
               </div>
-            ) : (
-              <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-4">
-                <div>
-                  <h2 className="text-4xl sm:text-5xl md:text-6xl font-black bg-gradient-to-r from-white to-white/50 bg-clip-text text-transparent font-montserrat mb-3 tracking-tight">
-                    Most Popular
-                  </h2>
-                  <p className="text-lg sm:text-xl text-muted-foreground font-medium">Top trending downloads in our community</p>
+
+              <div className="md:col-span-2">
+                <div className="text-sm text-muted-foreground mb-2">{modalGame.developer}</div>
+                <div className="prose max-w-none mb-4" style={{ whiteSpace: "pre-wrap" }}>{modalGame.description}</div>
+
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div><strong>Size:</strong> {modalGame.size || "?"}</div>
+                  <div><strong>Release:</strong> {modalGame.release_date || "?"}</div>
+                  <div><strong>Source:</strong> {modalGame.source || "?"}</div>
+                  <div><strong>Downloads:</strong> {formatNumber(gameStats[modalGame.appid]?.downloads || 0)}</div>
+                </div>
+
+                <div className="mt-4 flex gap-2">
+                  <Button onClick={() => goToGame(modalGame.appid)}>Open</Button>
+                  <Button variant="outline" onClick={() => copyGameLink(modalGame.appid)}>Copy link</Button>
+                  <Button variant="ghost" onClick={() => toggleFavorite(modalGame.appid)}>{favorites.includes(modalGame.appid) ? "Unfavorite" : "Favorite"}</Button>
                 </div>
               </div>
-            )}
-            
-            {loading ? (
-               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {Array.from({ length: 4 }).map((_, index) => (
-                    <GameCardSkeleton key={`skeleton-popular-${index}`} />
-                  ))}
-               </div>
-            ) : (
-                <Carousel
-                  opts={{
-                    align: "start",
-                    loop: false,
-                    skipSnaps: false,
-                    dragFree: true,
-                  }}
-                  className="w-full"
-                >
-                  <CarouselContent className="-ml-2 md:-ml-4 pb-10">
-                    {popularReleases.map((game) => (
-                      <CarouselItem
-                        key={game.appid}
-                        className="pl-2 md:pl-4 basis-full sm:basis-1/2 md:basis-1/3 lg:basis-1/3 xl:basis-1/4"
-                      >
-                        <GameCard game={game} stats={gameStats[game.appid]} isPopular />
-                      </CarouselItem>
-                    ))}
-                  </CarouselContent>
-                  <CarouselPrevious className="left-0 -translate-x-1/2 bg-black/50 hover:bg-black/80 border-white/10 text-white backdrop-blur-md" />
-                  <CarouselNext className="right-0 translate-x-1/2 bg-black/50 hover:bg-black/80 border-white/10 text-white backdrop-blur-md" />
-                </Carousel>
-            )}
+            </div>
           </div>
-        </section>
-      )}
-
-      <section id="featured" className="py-16 px-4">
-        <div className="container mx-auto max-w-7xl">
-          {loading ? (
-            <>
-              <div className="mb-10">
-                <Skeleton className="h-10 w-56 mb-3 bg-muted/40" />
-                <Skeleton className="h-5 w-96 bg-muted/30" />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-                {Array.from({ length: 20 }).map((_, i) => (
-                  <GameCardSkeleton key={`skeleton-all-${i}`} />
-                ))}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="mb-10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <div>
-                  <h2 className="text-4xl md:text-5xl font-black text-foreground font-montserrat mb-3">All Games</h2>
-                  <p className="text-lg text-muted-foreground">Browse our complete collection</p>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setRefreshKey((prev) => prev + 1)
-                    loadGames(true)
-                  }}
-                  disabled={refreshing}
-                  className="rounded-full px-6"
-                >
-                  {refreshing ? "Refreshing..." : "Refresh Games"}
-                </Button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-                {(loading || refreshing) ? (
-                  Array.from({ length: itemsPerPage }).map((_, i) => (
-                    <GameCardSkeleton key={`skeleton-all-${i}`} />
-                  ))
-                ) : (
-                  paginatedFeaturedGames.map((game) => {
-                    const isGamePopular = popularAppIds.has(game.appid)
-
-                    return <GameCard key={game.appid} game={game} stats={gameStats[game.appid]} isPopular={isGamePopular} />
-                  })
-                )}
-              </div>
-            </>
-          )}
-
-          {totalPages > 1 && (
-            <div className="mt-8">
-              <Pagination>
-                <PaginationContent>
-                  <PaginationItem>
-                    <PaginationPrevious
-                      onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                      className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                    />
-                  </PaginationItem>
-
-                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                    let pageNumber
-                    if (totalPages <= 5) {
-                      pageNumber = i + 1
-                    } else if (currentPage <= 3) {
-                      pageNumber = i + 1
-                    } else if (currentPage >= totalPages - 2) {
-                      pageNumber = totalPages - 4 + i
-                    } else {
-                      pageNumber = currentPage - 2 + i
-                    }
-
-                    return (
-                      <PaginationItem key={pageNumber}>
-                        <PaginationLink
-                          onClick={() => setCurrentPage(pageNumber)}
-                          isActive={currentPage === pageNumber}
-                          className="cursor-pointer"
-                        >
-                          {pageNumber}
-                        </PaginationLink>
-                      </PaginationItem>
-                    )
-                  })}
-
-                  <PaginationItem>
-                    <PaginationNext
-                      onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                      className={currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                    />
-                  </PaginationItem>
-                </PaginationContent>
-              </Pagination>
-            </div>
-          )}
-
-          {featuredGames.length === 0 && !loading && !isOnline && (
-            <div className="text-center py-20">
-              <div className="max-w-xl mx-auto">
-                <OfflineBanner
-                  onRetry={() => {
-                    setGamesError(null)
-                    setLoading(true)
-                    loadGames(true)
-                  }}
-                />
-              </div>
-            </div>
-          )}
-
-          {featuredGames.length === 0 && hasLoadedGames && emptyStateReady && !loading && isOnline && (
-            <div className="text-center py-20">
-              <div className="max-w-xl mx-auto">
-                <ErrorMessage
-                  title={gamesError ? "Games Loading Issue" : "No Games Available"}
-                  message={
-                    gamesError
-                      ? gamesError.message
-                      : "We couldn't find any games at the moment. Please try again later or contact support if the issue persists."
-                  }
-                  errorCode={gamesError ? gamesError.code : generateErrorCode(ErrorTypes.GAME_FETCH, "launcher-empty")}
-                  retry={() => {
-                    setGamesError(null)
-                    setLoading(true)
-                    loadGames(true)
-                  }}
-                />
-              </div>
-            </div>
-          )}
         </div>
-      </section>
+      )}
     </div>
-  )
+  );
 }
+
+export default LauncherPage;

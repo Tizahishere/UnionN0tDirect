@@ -42,7 +42,7 @@ if (process.platform === 'win32') {
 }
 try {
   if (typeof app.setName === 'function') app.setName('UnionCrax.Direct')
-  else app.name = 'UnionCrax.Direct'
+  else app.name = 'UnionCrax.NotDirect'
 } catch { }
 const pendingDownloads = []
 let lastPixeldrainDownloadTime = 0
@@ -240,7 +240,7 @@ function registerProcessLogging() {
 // === Discord Rich Presence ===
 let rpcClient = null
 let rpcReady = false
-let rpcEnabled = false
+let rpcEnabled = true
 const RPC_CLIENT_ID_DEFAULT = '1464971744199839928'
 let rpcClientId = RPC_CLIENT_ID_DEFAULT
 let rpcActiveClientId = null

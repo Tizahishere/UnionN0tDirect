@@ -411,7 +411,7 @@ export function LibraryPage() {
       <section className="space-y-4">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl sm:text-3xl font-black font-montserrat">Your Library</h1>
-          <Badge className="rounded-full bg-primary/15 text-primary border-primary/20">Direct downloads</Badge>
+          <Badge className="rounded-full bg-primary/15 text-primary border-primary/20">NotDirect downloads</Badge>
         </div>
         <p className="text-sm text-muted-foreground max-w-2xl">
           Titles detected inside your installed and installing folders appear here.
