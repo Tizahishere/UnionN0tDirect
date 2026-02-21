@@ -16,6 +16,10 @@ A Fork of a cool electron app named Union Crax Direct or sum sh
 - **History**: Track your recently played games
 - **Lightweight**: Minimal resource usage compared to web browser
 
+## Installation
+Windows: https://github.com/Tizahishere/UnionN0tDirect/actions/runs/22255013216/artifacts/5600820213
+Linux: https://github.com/Tizahishere/UnionN0tDirect/actions/runs/22255013216/artifacts/5600812520
+
   ## Features This Fork Adds
   - **View Sort** - Option to Show How Many Games To Appear
   - **Better Home UI** - It just looks better doesn't it? (DONT LEAVE THE HOME OPEN IN PUBLIC IT SOMETIMES SHOWS NSFW GAMES IN SPOTLIGHT BANNER WITH NO BLUR)
@@ -26,15 +30,6 @@ A Fork of a cool electron app named Union Crax Direct or sum sh
 - **RAM**: 2GB minimum (4GB recommended)
 - **Storage**: 500MB for app, plus space for game downloads
 
-## Installation
-You are required to build the project your self
-To Access NotDirect 0.01
-```bash
-# Clone repository
-git clone https://github.com/Tizahishere/UnionN0tDirect.git
-cd (Location of the UnionN0tDirect)
-pnpm run pack
-```
 
 **Made with ❤️ by the [UnionCrax](https://union-crax.xyz) Team**
 **Forked By Underscore111_**
