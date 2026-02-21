@@ -1,12 +1,9 @@
-# UnionCrax.Direct
+# UnionCrax.NotDirect
 <img width="960" height="540" alt="main" src="https://github.com/user-attachments/assets/e6e7050a-3d7a-4f3c-9fb2-e466fd5f017b" />
 
 
-A fast, standalone Electron desktop application for managing and launching games from the UnionCrax platform. Direct downloads with minimal overhead and full control over your gaming library.
+A Fork of a cool electron app named Union Crax Direct or sum sh
 
-![Version](https://img.shields.io/github/v/release/Union-Crax/UnionCrax.Direct?include_prereleases&style=flat-square)
-![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078d4?style=flat-square)
 
 ## Features
 
