@@ -1,79 +1,49 @@
-name: Build and Release
-
+name: Build Electron App
 
 on:
   push:
-    branches: [ main ]
     tags:
       - 'v*'
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write
     strategy:
-      fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Checkout code
+      - name: Check out repo
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Setup Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
+      - name: Install pnpm
+        run: npm install -g pnpm
 
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build application
-        run: pnpm -s build && pnpm exec electron-builder --publish=never
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          USE_HARD_LINKS: false
-          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - name: Build renderer
+        run: pnpm run build:renderer
+
+      - name: Build electron
+        run: pnpm run build:electron
+
+      - name: Package app
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            pnpm exec electron-builder --win --x64 --publish=never
+          else
+            pnpm exec electron-builder --linux --x64 --publish=never
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ matrix.os }}
-          path: |
-            dist-packaged/*.exe
-            dist-packaged/*.zip
-            dist-packaged/*.AppImage
-            dist-packaged/*.tar.gz
-
-  release:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist-packaged
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: dist-packaged/**
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: app-${{ matrix.os }}
+          path: dist-packaged/**
