@@ -1,4 +1,3 @@
-// renderer/src/app/pages/LauncherPage.tsx
 import React, {
   type FormEvent,
   useCallback,
@@ -19,7 +18,13 @@ import { ErrorMessage } from "@/components/ErrorMessage";
 import { RateLimitError } from "@/components/RateLimitError";
 import { AnimatedCounter } from "@/components/AnimatedCounter";
 import { OfflineBanner } from "@/components/OfflineBanner";
-import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
+} from "@/components/ui/carousel";
 import {
   Pagination,
   PaginationContent,
@@ -35,7 +40,6 @@ import { useOnlineStatus } from "@/hooks/use-online-status";
 
 import {
   Hammer,
-  Search,
   Sun,
   Moon,
   Heart,
@@ -47,24 +51,21 @@ import {
   Clock,
 } from "lucide-react";
 
-/* -------------------------------------------------------------------------- */
-/* ------------------------------ Helpers & Types ---------------------------- */
-/* -------------------------------------------------------------------------- */
-
 interface Game {
   appid: string;
   name: string;
   description: string;
   genres: string[];
   image: string;
-  release_date: string;
-  size: string;
-  source: string;
+  release_date?: string;
+  size?: string;
+  source?: string;
   version?: string;
   update_time?: string;
   searchText?: string;
   developer?: string;
   hasCoOp?: boolean;
+  addedAt?: number;
 }
 
 class GamesFetchError extends Error {
@@ -76,7 +77,7 @@ class GamesFetchError extends Error {
   }
 }
 
-const normalizeSearchText = (text: string): string =>
+const normalizeSearchText = (text = ""): string =>
   text
     .toLowerCase()
     .normalize("NFD")
@@ -94,15 +95,10 @@ function useDebounced<T>(value: T, delay = 260) {
   return debounced;
 }
 
-/* -------------------------------------------------------------------------- */
-/* ------------------------------ Component --------------------------------- */
-/* -------------------------------------------------------------------------- */
-
 export function LauncherPage(): JSX.Element {
   const navigate = useNavigate();
   const isOnline = useOnlineStatus();
 
-  // core state
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchInput, setSearchInput] = useState("");
@@ -114,12 +110,10 @@ export function LauncherPage(): JSX.Element {
   const [hasLoadedGames, setHasLoadedGames] = useState(false);
   const [emptyStateReady, setEmptyStateReady] = useState(false);
 
-  // pagination / hybrid mode
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(20);
-  const [useHybridLoadMore, setUseHybridLoadMore] = useState(true); // hybrid pagination + load more
+  const [useHybridLoadMore, setUseHybridLoadMore] = useState(true);
 
-  // derived & auxiliary
   const [recentlyInstalledGames, setRecentlyInstalledGames] = useState<Game[]>([]);
   const [shortcutLabel, setShortcutLabel] = useState("Ctrl+K");
   const [statsCacheTime, setStatsCacheTime] = useState<number>(0);
@@ -138,7 +132,6 @@ export function LauncherPage(): JSX.Element {
     }
   });
 
-  // new features: favorites, recently viewed, modal / spotlight
   const [favorites, setFavorites] = useState<string[]>(() => {
     try {
       return JSON.parse(localStorage.getItem("uc_favorites") || "[]");
@@ -154,23 +147,16 @@ export function LauncherPage(): JSX.Element {
     }
   });
 
-  // modal & spotlight
   const [modalOpen, setModalOpen] = useState(false);
   const [modalGame, setModalGame] = useState<Game | null>(null);
   const [spotlightIndex, setSpotlightIndex] = useState(0);
   const spotlightTimerRef = useRef<number | null>(null);
 
-  // scroll-to-top
   const [showBackToTop, setShowBackToTop] = useState(false);
 
-  // active load id for concurrency safety (copied from original)
   const activeLoadIdRef = useRef(0);
 
-  /******************************
-   * Small effects & persisted *
-   *****************************/
   useEffect(() => {
-    // platform shortcut label
     if (typeof navigator !== "undefined") {
       const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
       setShortcutLabel(isMac ? "Cmd+K" : "Ctrl+K");
@@ -178,7 +164,6 @@ export function LauncherPage(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    // apply theme
     try {
       document.documentElement.classList.toggle("dark", theme === "dark");
       localStorage.setItem("uc_theme", theme);
@@ -204,45 +189,11 @@ export function LauncherPage(): JSX.Element {
   }, [recentlyViewed]);
 
   useEffect(() => {
-    // scroll event for back-to-top
     const onScroll = () => setShowBackToTop(window.scrollY > 600);
     window.addEventListener("scroll", onScroll);
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  /******************************
-   * Spotlight auto-rotation    *
-   *****************************/
-  // Ts still shows nsfw games after i tried to fix it still
-  const featuredGamesForSpotlight = useMemo(() => {
-    // choose top 8 as spotlight: prefer popular then newest
-    const byPopularity = [...games].sort((a, b) => {
-      const aStats = gameStats[a.appid] || { downloads: 0, views: 0 };
-      const bStats = gameStats[b.appid] || { downloads: 0, views: 0 };
-      return bStats.downloads - aStats.downloads;
-    });
-    return byPopularity.slice(0, 8);
-  }, [games, gameStats]);
-
-  useEffect(() => {
-    if (spotlightTimerRef.current) {
-      window.clearInterval(spotlightTimerRef.current);
-      spotlightTimerRef.current = null;
-    }
-    if (featuredGamesForSpotlight.length > 1) {
-      spotlightTimerRef.current = window.setInterval(() => {
-        setSpotlightIndex((s) => (s + 1) % featuredGamesForSpotlight.length);
-      }, 7000);
-    }
-    return () => {
-      if (spotlightTimerRef.current) window.clearInterval(spotlightTimerRef.current);
-      spotlightTimerRef.current = null;
-    };
-  }, [featuredGamesForSpotlight.length]);
-
-  /******************************
-   * Fetch game stats & games   *
-   *****************************/
   const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
   const isTransientGamesFetchError = (error: unknown): boolean => {
@@ -290,7 +241,6 @@ export function LauncherPage(): JSX.Element {
   );
 
   const fetchGames = useCallback(async (): Promise<Game[]> => {
-    // Check offline before attempting fetch
     if (typeof navigator !== "undefined" && !navigator.onLine) {
       return [];
     }
@@ -302,13 +252,21 @@ export function LauncherPage(): JSX.Element {
     }
 
     const data = await response.json();
-    return data.map((game: any) => ({
-      ...game,
-      searchText: normalizeSearchText(`${game.name} ${game.description} ${game.genres?.join(" ") || ""}`),
-      developer: game.developer && game.developer !== "Unknown" ? game.developer : (() => {
-        const match = (game.description || "").match(/(?:by|from|developer|dev|studio)\s+([^.,\n]+)/i);
-        return match ? match[1].trim() : "Unknown";
-      })(),
+    return (Array.isArray(data) ? data : []).map((game: any) => ({
+      appid: String(game.appid ?? game.id ?? ""),
+      name: String(game.name ?? game.title ?? "Unknown"),
+      description: String(game.description ?? ""),
+      genres: Array.isArray(game.genres) ? game.genres : (typeof game.genres === "string" ? game.genres.split(",").map((s: string) => s.trim()) : []),
+      image: String(game.image ?? "/banner.png"),
+      release_date: game.release_date ?? game.releaseDate ?? undefined,
+      size: game.size ?? undefined,
+      source: game.source ?? undefined,
+      version: game.version ?? undefined,
+      update_time: game.update_time ?? game.updatedAt ?? undefined,
+      developer: game.developer ?? undefined,
+      hasCoOp: !!game.hasCoOp,
+      addedAt: typeof game.addedAt === "number" ? game.addedAt : undefined,
+      searchText: normalizeSearchText(`${game.name ?? game.title ?? ""} ${game.description ?? ""} ${(Array.isArray(game.genres) ? game.genres.join(" ") : "")}`),
     }));
   }, []);
 
@@ -316,7 +274,7 @@ export function LauncherPage(): JSX.Element {
     async (forceRefresh = false) => {
       const loadId = ++activeLoadIdRef.current;
       const isInitialLoad = !hasLoadedGames && games.length === 0;
-      const maxAttempts = isInitialLoad ? 12 : 2;
+      const maxAttempts = isInitialLoad ? 8 : 2;
 
       let refreshStart: number | null = null;
       if (isInitialLoad) setLoading(true);
@@ -331,19 +289,31 @@ export function LauncherPage(): JSX.Element {
           const gamesData = await fetchGames();
           if (loadId !== activeLoadIdRef.current) return;
 
+          const sanitized = gamesData
+            .filter(Boolean)
+            .map((g) => ({
+              ...g,
+              genres: Array.isArray(g.genres) ? g.genres : [],
+              searchText: g.searchText ?? normalizeSearchText(`${g.name} ${g.description} ${(g.genres || []).join(" ")}`),
+              developer: g.developer && g.developer !== "Unknown" ? g.developer : (() => {
+                const match = (g.description || "").match(/(?:by|from|developer|dev|studio)\s+([^.,\n]+)/i);
+                return match ? match[1].trim() : "Unknown";
+              })(),
+            }));
+
           startTransition(() => {
-            setGames(gamesData);
+            setGames(sanitized);
             setHasLoadedGames(true);
           });
 
-          if (gamesData.length > 0) {
+          if (sanitized.length > 0) {
             await fetchGameStats(forceRefresh);
           }
 
           setLoading(false);
           if (refreshStart !== null) {
             const elapsed = Date.now() - refreshStart;
-            const minDuration = 500; // ms
+            const minDuration = 500;
             if (elapsed < minDuration) {
               setTimeout(() => setRefreshing(false), minDuration - elapsed);
             } else {
@@ -356,7 +326,6 @@ export function LauncherPage(): JSX.Element {
         } catch (error) {
           if (loadId !== activeLoadIdRef.current) return;
 
-          // If we went offline mid-load, stop retrying and let the offline UI handle it.
           if (typeof navigator !== "undefined" && !navigator.onLine) {
             setLoading(false);
             setRefreshing(false);
@@ -377,7 +346,7 @@ export function LauncherPage(): JSX.Element {
           if (error instanceof GamesFetchError && error.status === 429) {
             setGamesError({
               type: "rate-limit",
-              message: "Sum shit just happened  (Error 429).",
+              message: "Rate limit encountered.",
               code: generateErrorCode(ErrorTypes.GAME_FETCH, "launcher"),
             });
           } else {
@@ -385,8 +354,8 @@ export function LauncherPage(): JSX.Element {
               type: "games",
               message:
                 error instanceof GamesFetchError && error.status
-                  ? `Unable to load games (Status: ${error.status}). Please try again or contact support if the issue persists.`
-                  : "Unable to load games. Please try again or contact support if the issue persists.",
+                  ? `Unable to load games (Status: ${error.status}).`
+                  : "Unable to load games. Please try again later.",
               code: generateErrorCode(ErrorTypes.GAME_FETCH, "launcher"),
             });
           }
@@ -399,14 +368,10 @@ export function LauncherPage(): JSX.Element {
     [fetchGames, fetchGameStats, games.length, hasLoadedGames, isOnline]
   );
 
-  // initial load
   useEffect(() => {
     void loadGames();
   }, [loadGames]);
 
-  /******************************
-   * Recently installed lookup  *
-   *****************************/
   useEffect(() => {
     let ignore = false;
     const loadInstalled = async () => {
@@ -423,9 +388,11 @@ export function LauncherPage(): JSX.Element {
             if (meta && meta.appid) {
               installedMap.set(meta.appid, {
                 ...meta,
+                appid: meta.appid,
                 name: meta.name || meta.appid,
                 image: meta.image || "/banner.png",
                 genres: Array.isArray(meta.genres) ? meta.genres : [],
+                addedAt: meta.addedAt ?? meta.added_at ?? undefined,
               });
             }
           }
@@ -442,9 +409,6 @@ export function LauncherPage(): JSX.Element {
     };
   }, [refreshKey]);
 
-  /******************************
-   * Search suggestions + filter *
-   *****************************/
   const [searchSuggestions, setSearchSuggestions] = useState<{ appid: string; name: string }[]>([]);
 
   useEffect(() => {
@@ -457,9 +421,6 @@ export function LauncherPage(): JSX.Element {
     setSearchSuggestions(matches);
   }, [debouncedSearch, games]);
 
-  /******************************
-   * Derived lists: new/popular  *
-   *****************************/
   const newReleases = useMemo(() => games.slice(0, 8), [games]);
 
   const popularReleases = useMemo(() => {
@@ -487,9 +448,6 @@ export function LauncherPage(): JSX.Element {
 
   const popularAppIds = useMemo(() => new Set(popularReleases.map((g) => g.appid)), [popularReleases]);
 
-  /******************************
-   * Pagination / Hybrid load    *
-   *****************************/
   const featuredForDisplay = useMemo(() => {
     if (games.length === 0) return [];
     return refreshKey > 0 ? [...games].sort(() => Math.random() - 0.5) : games;
@@ -509,9 +467,6 @@ export function LauncherPage(): JSX.Element {
   const startItem = (currentPage - 1) * itemsPerPage + 1;
   const endItem = Math.min(currentPage * itemsPerPage, featuredForDisplay.length);
 
-  /******************************
-   * Stats aggregator            *
-   *****************************/
   const stats = useMemo(() => {
     const totalSizeGB = games.reduce((acc, game) => {
       const sizeMatch = (game.size || "").match(/(\d+(?:\.\d+)?)\s*(GB|MB)/i);
@@ -534,9 +489,6 @@ export function LauncherPage(): JSX.Element {
     };
   }, [games, gameStats]);
 
-  /******************************
-   * Favorites & RecentlyViewed  *
-   *****************************/
   const toggleFavorite = useCallback((appid: string) => {
     setFavorites((prev) => {
       const next = prev.includes(appid) ? prev.filter((p) => p !== appid) : [appid, ...prev];
@@ -551,14 +503,10 @@ export function LauncherPage(): JSX.Element {
     });
   }, []);
 
-  /******************************
-   * Modal and open actions     *
-   *****************************/
   const openGameModal = useCallback((game: Game) => {
     setModalGame(game);
     setModalOpen(true);
     addRecentlyViewed(game.appid);
-    // optional: set discord rpc via ipc if your preload exposes it
     try {
       if ((window as any).ipcRenderer?.invoke) {
         (window as any).ipcRenderer.invoke("set-discord-activity", {
@@ -583,9 +531,6 @@ export function LauncherPage(): JSX.Element {
     } catch {}
   };
 
-  /******************************
-   * UI Handlers                *
-   *****************************/
   const handleSearchSubmit = useCallback(
     (e: FormEvent) => {
       e.preventDefault();
@@ -599,9 +544,22 @@ export function LauncherPage(): JSX.Element {
     void loadGames(true);
   }, [loadGames]);
 
-  /******************************
-   * Keyboard shortcut to focus *
-   *****************************/
+  useEffect(() => {
+    if (spotlightTimerRef.current) {
+      window.clearInterval(spotlightTimerRef.current);
+      spotlightTimerRef.current = null;
+    }
+    if (featuredForDisplay.length > 1) {
+      spotlightTimerRef.current = window.setInterval(() => {
+        setSpotlightIndex((s) => (s + 1) % featuredForDisplay.length);
+      }, 7000);
+    }
+    return () => {
+      if (spotlightTimerRef.current) window.clearInterval(spotlightTimerRef.current);
+      spotlightTimerRef.current = null;
+    };
+  }, [featuredForDisplay.length]);
+
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
@@ -624,15 +582,6 @@ export function LauncherPage(): JSX.Element {
     return () => window.removeEventListener("keydown", handleKey);
   }, []);
 
-  /******************************
-   * Render helpers             *
-   *****************************/
-  const isGamePopular = (appid: string) => popularAppIds.has(appid);
-
-  /******************************
-   * Main render                *
-   *****************************/
-  // Rate limit special render
   if (gamesError?.type === "rate-limit" && isOnline && !loading) {
     return (
       <RateLimitError
@@ -649,7 +598,6 @@ export function LauncherPage(): JSX.Element {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* HERO / HEADER */}
       <section id="hero" className="relative py-6 sm:py-8 px-4 border-b border-border/40 bg-card/10 sticky top-0 z-30">
         <div className="container mx-auto max-w-7xl flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
@@ -675,7 +623,7 @@ export function LauncherPage(): JSX.Element {
                 <Button size="sm" variant="outline" onClick={() => { setSearchInput(""); document.getElementById("uc-search-input")?.focus(); }}>
                   Clear
                 </Button>
-                <Button size="sm" onClick={() => void handleSearchSubmit(new Event("submit") as any)}>
+                <Button size="sm" onClick={() => { if (searchInput.trim()) navigate(`/search?q=${encodeURIComponent(searchInput.trim())}`); }}>
                   Search
                 </Button>
               </div>
@@ -685,7 +633,7 @@ export function LauncherPage(): JSX.Element {
                   {searchSuggestions.map((s) => (
                     <button
                       key={s.appid}
-                      onClick={() => navigate(`/game/${s.appid}`)}
+                      onClick={() => navigate(`/game/${encodeURIComponent(s.appid)}`)}
                       className="w-full text-left px-3 py-2 hover:bg-muted/20"
                     >
                       {s.name}
@@ -716,35 +664,32 @@ export function LauncherPage(): JSX.Element {
         </div>
       </section>
 
-      {/* Announcement / Spotlight */}
       <section className="py-8 px-4">
         <div className="container mx-auto max-w-7xl">
           <div className="rounded-2xl overflow-hidden border border-border/30 bg-gradient-to-br from-card to-card/60 p-4">
-            {/* Spotlight area: show the featuredGamesForSpotlight[spotlightIndex] */}
-            {featuredGamesForSpotlight.length > 0 ? (
+            {featuredForDisplay.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
                 <div className="md:col-span-2">
                   <div className="relative rounded-lg overflow-hidden h-56 md:h-72">
                     <img
-                      src={featuredGamesForSpotlight[spotlightIndex].image || "/banner.png"}
-                      alt={featuredGamesForSpotlight[spotlightIndex].name}
+                      src={featuredForDisplay[spotlightIndex]?.image || "/banner.png"}
+                      alt={featuredForDisplay[spotlightIndex]?.name || "Spotlight"}
                       className="w-full h-full object-cover"
                       loading="lazy"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent flex items-end p-6">
                       <div>
-                        <h2 className="text-2xl font-black text-white">{featuredGamesForSpotlight[spotlightIndex].name}</h2>
-                        <p className="text-sm text-white/90 mt-1 line-clamp-2">{featuredGamesForSpotlight[spotlightIndex].description}</p>
+                        <h2 className="text-2xl font-black text-white">{featuredForDisplay[spotlightIndex]?.name}</h2>
+                        <p className="text-sm text-white/90 mt-1 line-clamp-2">{featuredForDisplay[spotlightIndex]?.description}</p>
                         <div className="mt-3 flex gap-2">
-                          <Button onClick={() => openGameModal(featuredGamesForSpotlight[spotlightIndex])}>Open</Button>
-                          <Button variant="outline" onClick={() => window.open(featuredGamesForSpotlight[spotlightIndex].source || "#", "_blank")}>Source</Button>
+                          <Button onClick={() => featuredForDisplay[spotlightIndex] && openGameModal(featuredForDisplay[spotlightIndex])}>Open</Button>
+                          <Button variant="outline" onClick={() => featuredForDisplay[spotlightIndex] && window.open(featuredForDisplay[spotlightIndex].source || "#", "_blank")}>Source</Button>
                         </div>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Right: small stats / actions */}
                 <div className="md:col-span-1 space-y-3">
                   <div className="p-4 rounded-lg bg-card border border-border/20">
                     <div className="text-xs text-muted-foreground">Total Storage*</div>
@@ -793,7 +738,6 @@ export function LauncherPage(): JSX.Element {
         </div>
       </section>
 
-      {/* Controls / Filters */}
       <section className="py-6 px-4 border-y border-border/40">
         <div className="container mx-auto max-w-7xl flex flex-col lg:flex-row gap-4 items-start">
           <div className="flex-1">
@@ -809,7 +753,7 @@ export function LauncherPage(): JSX.Element {
                 {searchSuggestions.length > 0 && searchInput.trim() && (
                   <div className="absolute left-0 right-0 mt-2 bg-card border rounded-md z-40 max-h-52 overflow-auto">
                     {searchSuggestions.map((s) => (
-                      <button key={s.appid} onClick={() => navigate(`/game/${s.appid}`)} className="w-full text-left px-3 py-2 hover:bg-muted/10">
+                      <button key={s.appid} onClick={() => navigate(`/game/${encodeURIComponent(s.appid)}`)} className="w-full text-left px-3 py-2 hover:bg-muted/10">
                         {s.name}
                       </button>
                     ))}
@@ -847,7 +791,6 @@ export function LauncherPage(): JSX.Element {
             </div>
           </div>
 
-          {/* sidebar: recently installed & recent viewed */}
           <aside className="w-full lg:w-72 space-y-3">
             {recentlyInstalledGames.length > 0 && (
               <div className="rounded-2xl p-3 bg-card border border-border/20">
@@ -897,40 +840,8 @@ export function LauncherPage(): JSX.Element {
         </div>
       </section>
 
-      {/* Latest / Popular sections */}
       <main className="py-8 px-4">
         <div className="container mx-auto max-w-7xl">
-          {/* Latest */}
-          <section className="mb-10">
-            <div className="mb-6 flex items-center justify-between">
-              <div>
-                <h2 className="text-3xl font-black">Latest Games</h2>
-                <p className="text-sm text-muted-foreground">Recently added games</p>
-              </div>
-            </div>
-
-            {loading ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                {Array.from({ length: 4 }).map((_, i) => <GameCardSkeleton key={i} />)}
-              </div>
-            ) : (
-              <Carousel opts={{ align: "start", loop: false, dragFree: true }} className="w-full">
-                <CarouselContent className="-ml-2 md:-ml-4">
-                  {newReleases.map((g) => (
-                    <CarouselItem key={g.appid} className="pl-2 md:pl-4 basis-full sm:basis-1/2 md:basis-1/3 lg:basis-1/3 xl:basis-1/4">
-                      <div onClick={() => openGameModal(g)} role="button" tabIndex={0}>
-                        <GameCard game={g} stats={gameStats[g.appid]} />
-                      </div>
-                    </CarouselItem>
-                  ))}
-                </CarouselContent>
-                <CarouselPrevious />
-                <CarouselNext />
-              </Carousel>
-            )}
-          </section>
-
-          {/* Popular */}
           <section className="mb-10">
             <div className="mb-6 flex items-center justify-between">
               <div>
@@ -952,7 +863,6 @@ export function LauncherPage(): JSX.Element {
             )}
           </section>
 
-          {/* All / Grid (Hybrid pagination + Load more) */}
           <section id="featured" className="py-6">
             <div className="mb-6 flex items-center justify-between">
               <div>
@@ -976,7 +886,7 @@ export function LauncherPage(): JSX.Element {
                 <div className={`grid ${viewMode === "grid" ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" : "grid-cols-1 sm:grid-cols-2 md:grid-cols-3"} gap-6`}>
                   {paginatedFeaturedGames.map((g) => {
                     const isFav = favorites.includes(g.appid);
-                    const isPop = isGamePopular(g.appid);
+                    const isPop = popularAppIds.has(g.appid);
                     return (
                       <div key={g.appid} className="relative group">
                         <div onClick={() => openGameModal(g)} role="button" tabIndex={0}>
@@ -996,7 +906,6 @@ export function LauncherPage(): JSX.Element {
                   })}
                 </div>
 
-                {/* Pagination + Load more (hybrid if enabled) */}
                 <div className="mt-8 flex items-center justify-center gap-4">
                   <Pagination>
                     <PaginationContent>
@@ -1037,7 +946,6 @@ export function LauncherPage(): JSX.Element {
         </div>
       </main>
 
-      {/* Offline / Errors */}
       {!isOnline && games.length === 0 && !loading && (
         <OfflineBanner onRetry={() => { setGamesError(null); setLoading(true); void loadGames(true); }} />
       )}
@@ -1050,14 +958,12 @@ export function LauncherPage(): JSX.Element {
         </section>
       )}
 
-      {/* Back to top */}
       {showBackToTop && (
         <button onClick={() => document.getElementById("hero")?.scrollIntoView({ behavior: "smooth" })} className="fixed bottom-6 right-6 z-50 p-3 rounded-full bg-primary text-white shadow-lg hover:scale-105 transition" aria-label="Back to top">
           <ChevronUp className="h-5 w-5" />
         </button>
       )}
 
-      {/* Modal */}
       {modalOpen && modalGame && (
         <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => setModalOpen(false)} />
@@ -1098,6 +1004,3 @@ export function LauncherPage(): JSX.Element {
 }
 
 export default LauncherPage;
-
-// Congrats This is the end
-// i have gotten tortured enough
