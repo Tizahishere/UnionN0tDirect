@@ -107,8 +107,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
-      - name: Install dependencies
-        run: run: pnpm install --no-frozen-lockfile --prefer-offline
+      - name: Install dependencies 
+        run: pnpm install --no-frozen-lockfile --prefer-offline || pnpm install
         shell: bash
 
       - name: Build renderer (frontend)
