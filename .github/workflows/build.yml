@@ -1,4 +1,4 @@
-name: Build and Release
+name: Build and Release Launcher
 
 on:
   push:
@@ -9,69 +9,86 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+
     permissions:
       contents: write
+
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os:
+          - windows-latest
+          - ubuntu-latest
+
+    env:
+      ELECTRON_BUILDER_DISABLE_MAS: true
+      USE_HARD_LINKS: false
+      CSC_IDENTITY_AUTO_DISCOVERY: false
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
+          cache: pnpm
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10
+          run_install: false
 
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build application
-        run: pnpm -s build && pnpm exec electron-builder --publish=never
+      - name: Build renderer + electron
+        run: |
+          pnpm -s build:renderer
+          pnpm -s build:electron
+
+      - name: Build Electron Application
+        run: |
+          pnpm exec electron-builder --publish=never --win --x64 --linux
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          USE_HARD_LINKS: false
-          CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      - name: Upload artifacts
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ matrix.os }}
+          name: launcher-${{ matrix.os }}
           path: |
-            dist-packaged/*.exe
-            dist-packaged/*.zip
-            dist-packaged/*.AppImage
-            dist-packaged/*.tar.gz
+            dist-packaged/**/*.exe
+            dist-packaged/**/*.zip
+            dist-packaged/**/*.AppImage
+            dist-packaged/**/*.tar.gz
 
   release:
     needs: build
+
     if: startsWith(github.ref, 'refs/tags/')
+
     runs-on: ubuntu-latest
+
     permissions:
       contents: write
+
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist-packaged
 
-      - name: Create Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: dist-packaged/**
           draft: false
           prerelease: false
+          files: dist-packaged/**
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
