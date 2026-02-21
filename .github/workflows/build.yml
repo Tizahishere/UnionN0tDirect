@@ -33,16 +33,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
+
+      - name: Install pnpm
+        run: npm install -g pnpm
 
       - name: Enable Corepack
         run: corepack enable
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-          run_install: false
 
       - name: Install dependencies
         run: pnpm install
@@ -54,19 +50,16 @@ jobs:
 
       - name: Build Electron Application
         run: |
-          pnpm exec electron-builder --publish=never --win --x64 --linux
+          pnpm exec electron-builder --publish=never --${{ matrix.os == 'windows-latest' && 'win' || 'linux' }} --x64
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload build artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: launcher-${{ matrix.os }}
           path: |
-            dist-packaged/**/*.exe
-            dist-packaged/**/*.zip
-            dist-packaged/**/*.AppImage
-            dist-packaged/**/*.tar.gz
+            dist-packaged/**
 
   release:
     needs: build
@@ -84,11 +77,11 @@ jobs:
         with:
           path: dist-packaged
 
-      - name: Create GitHub Release
+      - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          files: dist-packaged/**
           draft: false
           prerelease: false
-          files: dist-packaged/**
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
