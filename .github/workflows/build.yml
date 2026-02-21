@@ -50,7 +50,7 @@ jobs:
           sudo apt-get install -y libfuse2
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --prefer-offline || pnpm install
+        run: pnpm install --no-frozen-lockfile --prefer-offline || pnpm install
 
       - name: Build renderer (frontend)
         run: pnpm -s build:renderer
@@ -108,7 +108,7 @@ jobs:
             ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --prefer-offline || pnpm install
+        run: run: pnpm install --no-frozen-lockfile --prefer-offline || pnpm install
         shell: bash
 
       - name: Build renderer (frontend)
