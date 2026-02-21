@@ -1,23 +1,79 @@
- scripts: {"package:electron": "npm run build:electron-combine && electron-builder build --publish=never",
-    "package:electron:x64": "npm run build:electron-combine && electron-builder build --mac --x64 --publish=never",
-    "package:electron:arm64": "npm run build:electron-combine && electron-builder build --mac --arm64 --publish=never",
-    "rebuild:electron": "electron-rebuild"
-},
-
-build: {
-  "asar": true,
-    "extends": null,
-    ....
-   "mac": {
-      "target": "dmg"
+{
+  "name": "unioncrax-notdirect",
+  "version": "1.1.0",
+  "description": "Standalone Electron app for managing and launching games from UnionCrax (Fork Of Union Direct)",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "author": "Tizah",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Tizahishere/UnionN0tDirect.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Tizahishere/UnionN0tDirect/issues"
+  },
+  "homepage": "https://github.com/Tizahishere/UnionN0tDirect#readme",
+  "scripts": {
+    "setup": "node node_modules/electron/install.js",
+    "dev": "concurrently -k \"pnpm:dev:renderer\" \"pnpm:dev:electron\"",
+    "dev:renderer": "vite --config renderer/vite.config.ts",
+    "dev:electron": "wait-on http://localhost:5173 && node scripts/run-electron.cjs electron/main.cjs",
+    "build": "pnpm -s build:renderer && pnpm -s build:electron",
+    "build:renderer": "vite build --config renderer/vite.config.ts",
+    "build:electron": "node scripts/build-electron.cjs",
+    "pack": "pnpm -s build && electron-builder",
+    "dist": "electron-builder"
+  },
+  "dependencies": { ... },
+  "devDependencies": { ... },
+  "build": {
+    "icon": "assets/icon.ico",
+    "appId": "xyz.unioncrax.notdirect",
+    "productName": "Union Crax NotDirect",
+    "npmRebuild": false,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Tizahishere",
+        "repo": "UnionN0tDirect"
+      }
+    ],
+    "directories": {
+      "output": "dist-packaged",
+      "buildResources": "assets"
     },
+    "files": [
+      "assets/**/*",
+      "electron/**/*",
+      "node_modules/**/*",
+      "renderer/dist/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/7zip-bin"
+    ],
     "win": {
-      "target": "nsis",
-      "artifactName": "${productName}-Setup-${version}.${ext}"
+      "icon": "assets/icon.ico",
+      "target": ["nsis", "portable", "zip"],
+      "publisherName": "Tizah"
+    },
+    "nsis": {
+      "oneClick": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Union Crax NotDirect"
     },
     "linux": {
-      "target": "deb"
-    },
-    ...
+      "target": ["AppImage"],
+      "icon": "assets/icons"
+    }
+  },
+  "pnpm": {
+    "overrides": {
+      "react-server-dom-webpack": "19.2.3",
+      "react-server-dom-parcel": "19.2.3",
+      "react-server-dom-turbopack": "19.2.3"
+    }
+  }
 }
-
