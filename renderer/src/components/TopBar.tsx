@@ -22,19 +22,17 @@ import {
 
 const siteNavItems = [
   { label: "Home", path: "/" },
-  { label: "Blogs", path: "/blogs" },
-  { label: "Request", path: "/request" },
+  { label: "Library", to: "/library" },
   { label: "About", path: "/about" },
-  { label: "Contacts", path: "/contacts" },
   { label: "FAQ", path: "/faq" },
   { label: "Donations", path: "/donations" },
   { label: "Discord", path: "/discord" },
 ]
 
 const directNavItems = [
-  { label: "Library", to: "/library" },
   { label: "Activity", to: "/downloads" },
   { label: "Settings", to: "/settings" },
+  { label: "Credits", to: "/credits" },
 ]
 
 const accountNavItems = [
