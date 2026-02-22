@@ -1,10 +1,10 @@
 {
   "name": "unioncrax-notdirect",
-  "version": "1.1.0",
+  "version": "1.1.2",
   "description": "Standalone Electron app for managing and launching games from UnionCrax (Fork Of Union Direct)",
   "type": "module",
   "main": "electron/main.cjs",
-  "author": "Tizah",
+  "author": "Underscore",
   "license": "MIT",
 
   "repository": {

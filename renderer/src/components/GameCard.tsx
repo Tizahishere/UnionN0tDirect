@@ -14,7 +14,6 @@ export interface Game {
   version?: string;
   update_time?: string;
   developer?: string;
-  searchText?: string;
 }
 
 interface Props {
@@ -25,7 +24,6 @@ interface Props {
   onOpen?: (appid: string) => void;
   onFavoriteToggle?: (appid: string) => void;
   isFavorite?: boolean;
-  compact?: boolean;
 }
 
 export const GameCard: React.FC<Props> = ({
@@ -36,77 +34,123 @@ export const GameCard: React.FC<Props> = ({
   onOpen,
   onFavoriteToggle,
   isFavorite = false,
-  compact = false,
 }) => {
-  const badge = isEditorPick ? "Editor’s Pick" : isPopular ? "Popular" : undefined;
+  const badge = isEditorPick
+    ? "Editor’s Pick"
+    : isPopular
+    ? "Popular"
+    : undefined;
+
   const isNew =
-    game.release_date && (Date.now() - new Date(game.release_date).getTime()) / (1000 * 60 * 60 * 24) <= 14;
+    game.release_date &&
+    (Date.now() - new Date(game.release_date).getTime()) /
+      (1000 * 60 * 60 * 24) <=
+      14;
 
   return (
     <div
-      className={`rounded-xl overflow-hidden border border-border/30 bg-card transition-shadow hover:shadow-lg ${
-        compact ? "flex gap-3 p-3 items-center" : ""
-      }`}
-      role="article"
-      aria-label={game.name}
       onClick={() => onOpen?.(game.appid)}
+      className="
+        group relative cursor-pointer
+        rounded-2xl overflow-hidden
+        bg-gradient-to-br from-[#0f0a1f] via-[#140c2a] to-black
+        border border-purple-900/40
+        transition-all duration-300
+        hover:scale-[1.04]
+        hover:shadow-[0_0_25px_rgba(168,85,247,0.4)]
+      "
     >
-      {/* Thumbnail */}
-      <div className={compact ? "w-20 flex-shrink-0" : "w-full h-44 md:h-36 lg:h-44"}>
+      {/* IMAGE SECTION */}
+      <div className="relative h-48 overflow-hidden">
         <img
           src={game.image || "/banner.png"}
           alt={game.name}
-          className={`${compact ? "h-14 w-20 rounded-md object-cover" : "w-full h-full object-cover"}`}
-          loading="lazy"
+          className="
+            w-full h-full object-cover
+            transition-transform duration-500
+            group-hover:scale-110
+          "
         />
+
+        {/* Dark Gradient Overlay */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
+
+        {/* Floating Badges */}
+        <div className="absolute top-3 left-3 flex gap-2">
+          {badge && (
+            <span className="text-[10px] px-3 py-1 rounded-full bg-purple-600 text-white font-semibold shadow-md">
+              {badge}
+            </span>
+          )}
+          {isNew && (
+            <span className="text-[10px] px-3 py-1 rounded-full bg-pink-500 text-white shadow-md">
+              NEW
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Body */}
-      <div className={compact ? "flex-1" : "p-4"}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold truncate">{game.name}</h3>
-            {!compact && <p className="text-xs text-muted-foreground line-clamp-2 mt-1">{game.description}</p>}
-            {compact && <div className="text-xs text-muted-foreground mt-1">{game.genres?.slice(0, 2).join(", ")}</div>}
-          </div>
+      {/* CONTENT */}
+      <div className="p-4">
+        {/* Title */}
+        <h3 className="text-white font-semibold text-lg truncate group-hover:text-purple-400 transition-colors">
+          {game.name}
+        </h3>
 
-          <div className="flex-shrink-0 ml-2 flex items-start gap-2">
-            {/* Badges */}
-            <div className="flex flex-col gap-1 items-end">
-              {badge && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-black font-semibold">
-                  {badge}
-                </span>
-              )}
-              {isNew && <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500 text-black">New</span>}
-            </div>
+        {/* Description */}
+        <p className="text-gray-400 text-sm mt-1 line-clamp-2">
+          {game.description}
+        </p>
+
+        {/* Genres */}
+        {game.genres && (
+          <div className="flex flex-wrap gap-2 mt-3">
+            {game.genres.slice(0, 3).map((genre) => (
+              <span
+                key={genre}
+                className="text-[11px] px-2 py-1 rounded-md bg-purple-900/40 text-purple-300"
+              >
+                {genre}
+              </span>
+            ))}
           </div>
-        </div>
+        )}
 
         {/* Footer */}
-        <div className="mt-3 flex items-center justify-between">
-          <div className="text-xs text-muted-foreground">
-            {game.developer ? (
-              <span className="inline-block truncate max-w-[10rem]">{game.developer}</span>
-            ) : (
-              <span className="inline-block truncate max-w-[10rem]">{game.source || "Unknown source"}</span>
-            )}
-          </div>
+        <div className="mt-4 flex items-center justify-between">
+          {/* Developer */}
+          <span className="text-xs text-gray-500 truncate max-w-[8rem]">
+            {game.developer || game.source || "Unknown"}
+          </span>
 
-          <div className="flex items-center gap-2">
-            <div className="text-xs flex items-center gap-1 text-muted-foreground">
-              <Download className="h-3 w-3" />
-              <span>{stats.downloads ? stats.downloads.toLocaleString() : "—"}</span>
+          {/* Right Side Stats */}
+          <div className="flex items-center gap-3">
+            <div className="text-xs flex items-center gap-1 text-gray-400">
+              <Download className="h-3 w-3 text-purple-400" />
+              <span>
+                {stats.downloads
+                  ? stats.downloads.toLocaleString()
+                  : "—"}
+              </span>
             </div>
+
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 onFavoriteToggle?.(game.appid);
               }}
-              aria-label={isFavorite ? "Unfavorite" : "Favorite"}
-              className="text-muted-foreground hover:text-red-400 p-1 rounded"
+              className="
+                p-1 rounded
+                text-gray-400
+                hover:text-yellow-400
+                transition-colors
+              "
             >
-              <Star className={`h-4 w-4 ${isFavorite ? "text-yellow-400" : ""}`} />
+              <Star
+                className={`h-4 w-4 ${
+                  isFavorite ? "text-yellow-400 fill-yellow-400" : ""
+                }`}
+              />
             </button>
           </div>
         </div>

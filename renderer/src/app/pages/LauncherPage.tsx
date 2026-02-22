@@ -605,8 +605,8 @@ export function LauncherPage(): JSX.Element {
               <Hammer className="h-7 w-7" />
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl font-black">Union Crax NotDirect</h1>
-              <p className="text-xs text-muted-foreground">A Fork Made By Underscore111_</p>
+              <h1 className="text-xl sm:text-2xl font-black">Union Crax Direct Refined</h1>
+              <p className="text-xs text-muted-foreground">Fork Made By Underscore111_</p>
             </div>
           </div>
 
