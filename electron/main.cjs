@@ -39,8 +39,8 @@ if (process.platform === 'win32') {
   } catch { }
 }
 try {
-  if (typeof app.setName === 'function') app.setName('UnionCrax.Direct')
-  else app.name = 'UnionCrax.Direct'
+  if (typeof app.setName === 'function') app.setName('UnionCrax.Direct Refined')
+  else app.name = 'UnionCrax.Direct Refined'
 } catch { }
 const pendingDownloads = []
 let lastPixeldrainDownloadTime = 0
