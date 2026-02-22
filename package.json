@@ -102,8 +102,7 @@
         "nsis",
         "portable",
         "zip"
-      ],
-      "publisherName": "Tizah"
+      ]
     },
     "nsis": {
       "oneClick": false,
