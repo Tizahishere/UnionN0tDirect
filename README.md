@@ -16,9 +16,10 @@ A Fork of a cool electron app named Union Crax Direct or sum sh
 - **History**: Track your recently played games
 - **Lightweight**: Minimal resource usage compared to web browser
 
-## Installation
-Windows: https://github.com/Tizahishere/UnionN0tDirect/actions/runs/22255013216/artifacts/5600820213
-Linux: https://github.com/Tizahishere/UnionN0tDirect/actions/runs/22255013216/artifacts/5600812520
+## Stuff I guess you would want to know
+You Can Get Early Access To Versions of N0tDirect
+By Building it your self
+Because the repo is commited but it takes long to put it up on releases 
 
   ## Features This Fork Adds
   - **View Sort** - Option to Show How Many Games To Appear
