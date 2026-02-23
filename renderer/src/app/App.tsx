@@ -13,6 +13,7 @@ import { ViewHistoryPage } from "@/app/pages/ViewHistoryPage"
 import { SearchHistoryPage } from "@/app/pages/SearchHistoryPage"
 import { CreditsPage } from "@/app/pages/CreditsPage"
 import { DownloadsProvider } from "@/context/downloads-context"
+import ScriptStudio from "./pages/ScriptStudio"
 // WHY THE FCRGKWK THIS NOT WORKINTGGGG
 export default function App(): JSX.Element {
   return (
@@ -32,6 +33,7 @@ export default function App(): JSX.Element {
             <Route path="/view-history" element={<ViewHistoryPage />} />
             <Route path="/search-history" element={<SearchHistoryPage />} />
             <Route path="/credits" element={<CreditsPage />} />
+            <Route path="/script" element={<ScriptStudio />} />
           </Route>
         </Routes>
       </DownloadsProvider>

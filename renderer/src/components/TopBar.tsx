@@ -33,6 +33,7 @@ const directNavItems = [
   { label: "Activity", to: "/downloads" },
   { label: "Settings", to: "/settings" },
   { label: "Credits", to: "/credits" },
+  { label: "Script Studio", to: "/script" },
 ]
 
 const accountNavItems = [
